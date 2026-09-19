@@ -11,95 +11,162 @@
 #define MAX_LINES 4048
 #define GET_EOF 0
 
-enum print_mode {
+#define MY_FREE(_array_) do { \
+    free(_array_); \
+    _array_ = NULL; \
+} while (0)
+
+enum mode_print {
     TO_STDOUT,
     TO_DEBUG,
     TO_WRITE
 };
 
-int ReadLines(char *line_ptrs[], const char *f_name);
-int FGetLine(char *line, size_t max_len, FILE *fp);
+struct text_info {
+    size_t real_file_size;
+    size_t informative_size;
+    size_t lines_amount;
+    char *buffer;
+    char **lines;
+};
+
+// int ReadLines(FILE *fp, char *line_ptrs[]);
+// int FGetLine(char *line, size_t max_len, FILE *fp);
+// void ClearDynamicMemory(char *line_ptrs[], int NLines);
+
+FILE *GetCheckedFile(const char *f_name, const char *f_mode);
 char *MyStrDup(const char *buf, int len);
-void PrintText(char *line_ptrs[], int NLines, int mode);
+void PrintText(char *line_ptrs[], int NLines, int mode, FILE *where_write);
 void WriteFile(char *line_ptrs[], int NLines, FILE *w_file);
-void ClearDynamicMemory(char *line_ptrs[], int NLines);
 int MyStrCmpAlphas(const void *left, const void *right);
+int MyStrCmpAlphasBacked(const void *left, const void *right);
 void Swap(void *a, void *b, size_t el_size);
 void MySort(void *arr, size_t arr_size, size_t el_size, 
             int (*Comparator)(const void *left_value, const void *right_value));
+int64_t GetFileSize(FILE *fp);
+struct text_info GetFileInfoBuf(const char *name_f);
+size_t GetLinePtrs(char buf[], size_t buf_size, char *line_ptrs[]);
 
 int main() {
-    char *text_ptrs[MAX_LINES] = {};
-    int all_lines = ReadLines(text_ptrs, "C:\\Users\\PelmenDi\\Desktop\\DED_DOP\\Test_file_to_read.txt");
-    if (all_lines < 1) {
-        return 1;
-    }
-    // printf("Cmp = %d\n", MyStrCmpAlphas((const void *)"          abc, de .f /", (const void *)"AbC __ - De   ."));
-    char *changable_text[MAX_LINES] = {};
-    memcpy(changable_text, text_ptrs, MAX_LINES * sizeof(text_ptrs[0]));
-    // printf("strcmp = %d\n", strcmp("aabc, de .", "AbC __ - De   ."));
-    // PrintText(text_ptrs, all_lines, TO_DEBUG);
-    // PrintText(changable_text, 20, TO_DEBUG);
-    MySort(changable_text, all_lines, sizeof(changable_text[0]), &MyStrCmpAlphas);
-    // PrintText(changable_text, all_lines, TO_STDOUT);
-    FILE *a_file = fopen("C:\\Users\\PelmenDi\\Desktop\\DED_DOP\\Onegin_to_write.txt", "w");
-    WriteFile(changable_text, all_lines, a_file);
-    fprintf(a_file, "\n---------------------------------------------------------------\n");
-    qsort(changable_text, all_lines, sizeof(changable_text[0]), &MyStrCmpAlphas);
-    WriteFile(changable_text, all_lines, a_file);
-    fprintf(a_file, "\n---------------------------------------------------------------\n");
-    WriteFile(text_ptrs, all_lines, a_file);
-    ClearDynamicMemory(text_ptrs, all_lines);
+    struct text_info text1 = GetFileInfoBuf("C:\\Users\\PelmenDi\\Desktop\\DED_DOP\\Onegin_to_read.txt");
+    text1.lines = (char **)calloc(MAX_LINES, sizeof(char *));
+    text1.lines_amount = GetLinePtrs(text1.buffer, text1.informative_size, text1.lines);
+
+    char **changable_text = (char **)calloc(text1.lines_amount, sizeof(char *));
+    memcpy(changable_text, text1.lines, sizeof(changable_text[0]) * text1.lines_amount);
+    FILE *w_file = fopen("C:\\Users\\PelmenDi\\Desktop\\DED_DOP\\Onegin_to_write.txt", "w");
+
+    MySort(changable_text, text1.lines_amount, sizeof(changable_text[0]), &MyStrCmpAlphas);
+    PrintText(changable_text, text1.lines_amount, TO_WRITE, w_file);
+    
+    qsort(changable_text, text1.lines_amount, sizeof(changable_text[0]), &MyStrCmpAlphasBacked);
+    PrintText(changable_text, text1.lines_amount, TO_WRITE, w_file);
+    
+    PrintText(text1.lines, text1.lines_amount, TO_WRITE, w_file);
+    
+    MY_FREE(text1.lines);
+    MY_FREE(text1.lines);
+    MY_FREE(changable_text);
+
     return 0;
+}
+
+size_t GetLinePtrs(char buf[], size_t buf_size, char *line_ptrs[]) {
+    line_ptrs[0] = buf;
+    char *last_found = buf;
+    size_t i = 1;
+    char *tmp = NULL;
+    for ( ; i < buf_size; i++) {
+        if ((tmp = strchr((const char *)(last_found), '\n')) == NULL) {
+            line_ptrs[i] = last_found;
+            buf[strchr((const char *)(last_found), '\0') - buf] = '\0';
+            break;
+        }
+        buf[tmp - buf] = '\0';
+        last_found = line_ptrs[i] = tmp + 1;
+        // printf("%llu) <%s>", i, line_ptrs[i]);
+    }
+    return i;
+}
+
+struct text_info GetFileInfoBuf(const char *name_f) {
+    FILE *r_file = fopen(name_f, "r");
+    size_t got_file_size = (size_t)(GetFileSize(r_file) + 1);
+    assert(got_file_size != ULLONG_MAX);
+    struct text_info examined_text = {};
+    examined_text.real_file_size = GetFileSize(r_file);
+    examined_text.buffer = (char *)calloc(examined_text.real_file_size, sizeof(char));
+    examined_text.informative_size = fread(examined_text.buffer, 
+        sizeof(*examined_text.buffer), examined_text.real_file_size, r_file) + 1;
+    examined_text.buffer[examined_text.informative_size - 1] = '\0';
+    return examined_text;
+}
+
+int64_t GetFileSize(FILE *fp) {
+  fseek(fp, 0, SEEK_END);
+  int64_t size = ftell(fp);
+  fseek(fp, 0, SEEK_SET);
+  return size;
 }
 
 int MyStrCmpAlphas(const void *left, const void *right) {
     const char *s1 = *(const char **)left;
     const char *s2 = *(const char **)right;
     size_t i = 0, j = 0;
-    bool s1_end_found = false, s2_end_found = false;
-    bool s1_alpha_found = false, s2_alpha_found = false;
-    // printf("i = %2llu, j = %2llu, s1[i] = %c | %2d, s2[j] = %c | %2d\n", i, j, s1[i], s1[i], s2[j], s2[j]);
-    while (s1[i] != '\0' && s2[j] != '\0') {
-        // printf("i = %2llu, j = %2llu, s1[i] = %c | %2d, s2[j] = %c | %2d\n", i, j, s1[i], s1[i], s2[j], s2[j]);
-        while (isalpha(s1[i]) == 0 && s1[i] != '\0') {
+    int sym1 = '\0', sym2 = '\0';
+    while (true) {
+        while (s1[i] != '\0' && !isalpha(s1[i])) {
             i++;
         }
-        if (!s1_alpha_found) {
-            s1_alpha_found = true;
-        }
-        while (isalpha(s2[j]) == 0 && s2[j] != '\0') {
+        while (s2[j] != '\0' && !isalpha(s2[j])) {
             j++;
         }
-        if (!s2_alpha_found) {
-            s2_alpha_found = true;
-        }
-        s1_end_found = (s1[i] == '\0'), s2_end_found = (s2[j] == '\0');
-        if ((s1_end_found && s2_end_found) || tolower(s1[i++]) != tolower(s2[j++])) {
-            break;
-        }
-    }
-    if (s1_alpha_found && s2_alpha_found) {
-        if (tolower(s1[--i]) < tolower(s2[--j])) {
-            return -1;
-        }
-        else if (tolower(s1[i]) == tolower(s2[j])) {
+        if (s1[i] == '\0' && s2[j] == '\0') {
             return 0;
         }
-        else {
+        if (s1[i] == '\0') {
+            return -1;
+        }
+        if (s2[j] == '\0') {
             return 1;
         }
+        sym1 = tolower(s1[i++]);
+        sym2 = tolower(s2[j++]);
+        if (sym1 != sym2) {
+            return (sym1 < sym2) ? -1 : 1;
+        }
     }
-    else {
-        return 1;
-    }    
 }
 
-void ClearDynamicMemory(char *line_ptrs[], int NLines) {
-    for (int i = 0; i < NLines; i++) {
-        free(line_ptrs[i]);
+int MyStrCmpAlphasBacked(const void *left, const void *right) {
+    const char *s1 = *(const char **)left;
+    const char *s2 = *(const char **)right;
+    size_t i = strlen(s1) - 1, j = strlen(s2) - 1;
+    int sym1 = '\0', sym2 = '\0';
+    while (true) {
+        while (!isalpha(s1[i]) && i > 0) {
+            i--;
+        }
+        while (!isalpha(s2[j]) && j > 0) {
+            j--;
+        }
+        if (i == 0 && j == 0) {
+            return 0;
+        }
+        if (i == 0) {
+            return -1;
+        }
+        if (j == 0) {
+            return 1;
+        }
+        sym1 = tolower(s1[i--]);
+        sym2 = tolower(s2[j--]);
+        if (sym1 != sym2) {
+            return (sym1 < sym2) ? -1 : 1;
+        }
     }
 }
+
 
 void WriteFile(char *line_ptrs[], int NLines, FILE *w_file) {
     for (int i = 0; i < NLines; i++) {
@@ -107,7 +174,7 @@ void WriteFile(char *line_ptrs[], int NLines, FILE *w_file) {
     }
 }
 
-void PrintText(char *line_ptrs[], int NLines, int mode) {
+void PrintText(char *line_ptrs[], int NLines, int mode, FILE *where_write) {
     switch (mode) {
     case TO_STDOUT:
         for (int i = 0; i < NLines; i++) {
@@ -122,49 +189,25 @@ void PrintText(char *line_ptrs[], int NLines, int mode) {
         }
         break;
     case TO_WRITE:
-
+        WriteFile(line_ptrs, NLines, where_write);
         break;
     }
 }
 
-int ReadLines(char *line_ptrs[], const char *f_name) {
-    FILE *fp = fopen(f_name, "r");
+FILE *GetCheckedFile(const char *f_name, const char *f_mode) {
+    FILE *fp = fopen(f_name, f_mode);
     if (fp == NULL) {
-        fprintf(stderr, "File %s has not been opened\n", f_name);
+        fprintf(stderr, "File %s in %s mode has not been opened\n", f_name, f_mode);
         fprintf(stderr, "%d: %s\n", errno, strerror(errno));
-        return -errno;
+        return NULL;
     }
-    char buffer[MAX_BUF] = {};
-    int len = 0, NLines = 0;
-    while ((len = FGetLine(buffer, MAX_BUF, fp)) > 0) {
-        line_ptrs[NLines++] = MyStrDup(buffer, len);
-    }
-    fclose(fp);
-    return NLines;
+    return fp;
 }
 
 char *MyStrDup(const char *buf, int len) {
     char *line_ptr = (char *)calloc(len + 1, sizeof(buf[0]));
     strcpy(line_ptr, buf);
     return line_ptr;
-}
-
-int FGetLine(char *line, size_t max_len, FILE *fp) {
-    size_t i = 0;
-    char buf_ch = '\0';
-    while ((buf_ch = fgetc(fp)) != '\n' && buf_ch != EOF && i < max_len - 1) {
-        line[i++] = buf_ch;
-    }
-    line[i++] = '\0';
-    if (buf_ch == '\n'){
-        return i;
-    }
-    else if (buf_ch == EOF) {
-        return GET_EOF;
-    }
-    else {
-        return -1;
-    }
 }
 
 void MySort(void *arr, size_t arr_size, size_t el_size, int (*Comparator)(const void *left_value, const void *right_value)) {
@@ -201,3 +244,163 @@ void Swap(void *a, void *b, size_t el_size) {
         b_ptr[i] = tmp;
     }
 }
+
+// int MyStrCmpAlphas(const void *left, const void *right) {
+//     const char *s1 = *(const char **)left;
+//     const char *s2 = *(const char **)right;
+//     size_t i = 0, j = 0;
+//     bool s1_end_found = false, s2_end_found = false;
+//     bool s1_alpha_found = false, s2_alpha_found = false;
+//     // printf("i = %2llu, j = %2llu, s1[i] = %c | %2d, s2[j] = %c | %2d\n", i, j, s1[i], s1[i], s2[j], s2[j]);
+//     while (s1[i] != '\0' && s2[j] != '\0') {
+//         // printf("i = %2llu, j = %2llu, s1[i] = %c | %2d, s2[j] = %c | %2d\n", i, j, s1[i], s1[i], s2[j], s2[j]);
+//         while (isalpha(s1[i]) == 0 && s1[i] != '\0') {
+//             i++;
+//         }
+//         if (!s1_alpha_found) {
+//             s1_alpha_found = true;
+//         }
+//         while (isalpha(s2[j]) == 0 && s2[j] != '\0') {
+//             j++;
+//         }
+//         if (!s2_alpha_found) {
+//             s2_alpha_found = true;
+//         }
+//         s1_end_found = (s1[i] == '\0'), s2_end_found = (s2[j] == '\0');
+//         if ((s1_end_found && s2_end_found) || tolower(s1[i++]) != tolower(s2[j++])) {
+//             break;
+//         }
+//     }
+//     if (s1_alpha_found && s2_alpha_found) {
+//         if (tolower(s1[--i]) < tolower(s2[--j])) {
+//             return -1;
+//         }
+//         else if (tolower(s1[i]) == tolower(s2[j])) {
+//             return 0;
+//         }
+//         else {
+//             return 1;
+//         }
+//     }
+//     // else if (!s1_alpha_found) {
+//     //     return 1;
+//     // }
+//     else {
+//         return 1;
+//     }    
+// }
+
+// int MyStrCmpAlphasBacked(const void *left, const void *right) {
+//     const char *s1 = *(const char **)left;
+//     const char *s2 = *(const char **)right;
+//     size_t i = strlen(s1) - 1, j = strlen(s2) - 1;
+//     bool s1_end_found = false, s2_end_found = false;
+//     bool s1_alpha_found = false, s2_alpha_found = false;
+//     while (s1[i] != '\0' && s2[j] != '\0') {
+//         // printf("i = %2llu, j = %2llu, s1[i] = %c | %2d, s2[j] = %c | %2d\n", i, j, s1[i], s1[i], s2[j], s2[j]);
+//         while (isalpha(s1[i]) == 0 && s1[i] != '\0') {
+//             i--;
+//         }
+//         if (!s1_alpha_found) {
+//             s1_alpha_found = true;
+//         }
+//         while (isalpha(s2[j]) == 0 && s2[j] != '\0') {
+//             j--;
+//         }
+//         if (!s2_alpha_found) {
+//             s2_alpha_found = true;
+//         }
+//         s1_end_found = (s1[i] == '\0'), s2_end_found = (s2[j] == '\0');
+//         if ((s1_end_found && s2_end_found) || tolower(s1[i--]) != tolower(s2[j--])) {
+//             break;
+//         }
+//     }
+//     if (s1_alpha_found && s2_alpha_found) {
+//         if (tolower(s1[++i]) < tolower(s2[++j])) {
+//             return -1;
+//         }
+//         else if (tolower(s1[i]) == tolower(s2[j])) {
+//             return 0;
+//         }
+//         else {
+//             return 1;
+//         }
+//     }
+//     // else if (!s1_alpha_found) {
+//     //     return 1;
+//     // }
+//     else {
+//         return 1;
+//     }
+// }
+
+// int FGetLine(char *line, size_t max_len, FILE *fp) {
+//     size_t i = 0;
+//     char buf_ch = '\0';
+//     while ((buf_ch = fgetc(fp)) != '\n' && buf_ch != EOF && i < max_len - 1) {
+//         line[i++] = buf_ch;
+//     }
+//     line[i++] = '\0';
+//     if (buf_ch == '\n'){
+//         return i;
+//     }
+//     else if (buf_ch == EOF) {
+//         return GET_EOF;
+//     }
+//     else {
+//         return -1;
+//     }
+// }
+
+
+// int ReadLines(FILE *fp, char *line_ptrs[]) {
+//     if (fp == NULL) {
+//         // fprintf(stderr, "File %s has not been opened\n",);
+//         fprintf(stderr, "%d: %s\n", errno, strerror(errno));
+//         return -errno;
+//     }
+//     char buffer[MAX_BUF] = {};
+//     int len = 0, NLines = 0;
+//     while ((len = FGetLine(buffer, MAX_BUF, fp)) > 0) {
+//         line_ptrs[NLines++] = MyStrDup(buffer, len);
+//     }
+//     fclose(fp);
+//     return NLines;
+// }
+
+// void ClearDynamicMemory(char *line_ptrs[], int NLines) {
+//     for (int i = 0; i < NLines; i++) {
+//         free(line_ptrs[i]);
+//     }
+// }
+
+    // ClearDynamicMemory(text1.buffer, text1.real_file_size);
+    // ClearDynamicMemory(changable_text, text1.informative_size);
+    // for (int i = 0; i < 10; i++) {
+    //     for (int j = 0; *(changable_text[i] + j) != '\n'; j++) {
+    //         putchar(changable_text[i][j]);
+    //     }
+    //     putchar('\n');
+    //     // printf("%s", changable_text[i]);
+    // }
+    // int all_lines = ReadLines(text_ptrs, "C:\\Users\\PelmenDi\\Desktop\\DED_DOP\\Test_file_to_read.txt");
+    // if (all_lines < 1) {
+    //     return 1;
+    // }
+    // // printf("Cmp = %d\n", MyStrCmpAlphas((const void *)"          abc, de .f /", (const void *)"AbC __ - De   ."));
+    // char *changable_text[MAX_LINES] = {};
+    // memcpy(changable_text, text_ptrs, MAX_LINES * sizeof(text_ptrs[0]));
+    // // printf("strcmp = %d\n", strcmp("aabc, de .", "AbC __ - De   ."));
+    // // PrintText(text_ptrs, all_lines, TO_DEBUG);
+    // // PrintText(changable_text, 20, TO_DEBUG);
+    // MySort(changable_text, all_lines, sizeof(changable_text[0]), &MyStrCmpAlphas);
+    // // PrintText(changable_text, all_lines, TO_STDOUT);
+    // FILE *a_file = fopen("C:\\Users\\PelmenDi\\Desktop\\DED_DOP\\Onegin_to_write.txt", "w");
+    // assert(a_file);
+    // WriteFile(changable_text, all_lines, a_file);
+    // fprintf(a_file, "\n---------------------------------------------------------------\n");
+    // qsort(changable_text, all_lines, sizeof(changable_text[0]), &MyStrCmpAlphasBacked);
+    // WriteFile(changable_text, all_lines, a_file);
+    // fprintf(a_file, "\n---------------------------------------------------------------\n");
+    // WriteFile(text_ptrs, all_lines, a_file);
+    // ClearDynamicMemory(text_ptrs, all_lines);
