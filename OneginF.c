@@ -45,7 +45,7 @@ int64_t GetFileSize(FILE *fp);
 size_t GetLinePtrs(char buf[], size_t buf_size, char *line_ptrs[]);
 void MySort(void *arr, size_t arr_size, size_t el_size, 
             int (*Comparator)(const void *left_value, const void *right_value));
-            int MyStrCmpAlphas(const void *left, const void *right);
+int MyStrCmpAlphas(const void *left, const void *right);
 int MyStrCmpAlphasBacked(const void *left, const void *right);
 void Swap(void *a, void *b, size_t el_size);
 void PrintText(char *line_ptrs[], int NLines, int mode, FILE *where_write);

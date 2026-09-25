@@ -43,13 +43,14 @@ struct text_info {
 // void ClearDynamicMemory(char *line_ptrs[], int NLines);
 // char *MyStrDup(const char *buf, int len);
 
+typedef int (*comparator_t)(const void *, const void *);
+
 struct text_info GetFileInfoBuf(const char *name_f, int flags, mode_t f_mode);
 int GetCheckedFile(const char *f_name, int flags, mode_t f_mode);
 size_t GetFileSize(int fd);
 size_t GetLinePtrs(char buf[], size_t buf_size, char *line_ptrs[]);
-void MySort(void *arr, size_t arr_size, size_t el_size, 
-            int (*Comparator)(const void *left_value, const void *right_value));
-            int MyStrCmpAlphas(const void *left, const void *right);
+void MySort(void *arr, size_t arr_size, size_t el_size, comparator_t Comparator);
+int MyStrCmpAlphas(const void *left, const void *right);
 int MyStrCmpAlphasBacked(const void *left, const void *right);
 void Swap(void *a, void *b, size_t el_size);
 void PrintText(char *line_ptrs[], int NLines, int mode, FILE *where_write);
@@ -93,9 +94,12 @@ struct text_info GetFileInfoBuf(const char *name_f, int flags, mode_t f_mode) {
     int r_file = GetCheckedFile(name_f, flags, f_mode);
     size_t got_file_size = GetFileSize(r_file) + 1;
     assert(got_file_size != 1);
+
     struct text_info examined_text = {};
     examined_text.real_file_size = got_file_size;
     examined_text.buffer = (char *)calloc(examined_text.real_file_size, sizeof(char));
+    assert(examined_text.buffer);
+
     int transferred_syms = read(r_file, examined_text.buffer, 
         examined_text.real_file_size / sizeof(*examined_text.buffer)) + 1;
     if (transferred_syms <= 0) {
@@ -105,8 +109,10 @@ struct text_info GetFileInfoBuf(const char *name_f, int flags, mode_t f_mode) {
         close(r_file);
         return examined_text;
     }
+    
     examined_text.informative_size = (size_t)transferred_syms;
     examined_text.buffer[examined_text.informative_size - 1] = '\0';
+    close(r_file);
     return examined_text;
 }
 
@@ -148,7 +154,7 @@ size_t GetLinePtrs(char buf[], size_t buf_size, char *line_ptrs[]) {
     return i;
 }
 
-void MySort(void *arr, size_t arr_size, size_t el_size, int (*Comparator)(const void *left_value, const void *right_value)) {
+void MySort(void *arr, size_t arr_size, size_t el_size, comparator_t Comparator) {
     // printf("%s\n", *(char **)(arr));
     for (size_t i = 1; i < arr_size; i++) {
         int64_t k = i;
