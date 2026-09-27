@@ -55,7 +55,7 @@ typedef enum {
     STATUS_EMPTY,
 } status_t;
 
-typedef void (*print_frmttd_t)(FILE *log_file, const void *element);
+typedef void (*frmttd_print_t)(FILE *log_file, const void *element);
 
 typedef struct {
     ON_DBG(const char *f_name;
@@ -67,6 +67,10 @@ typedef struct {
     int cur_err;
     int status_stck;
 } stack_t;
+
+#define PRINT_BOUNDARY(log_file) \
+    fprintf(log_file, "--------------------------------------------------" \
+        "--------------------------------------------------\n")
 
 const size_t MAX_SAFE_CAPACITY = ULLONG_MAX / 2 - 1;
 
@@ -80,7 +84,7 @@ elem_t StackPop(stack_t *st);
 FILE *LogOpen(const char *f_name, const char *f_mode);
 int StackDestroy(stack_t *st 
     ON_DBG(, const char *name_f, int ln));
-void LogStackDump(FILE *log_file, stack_t *st, print_frmttd_t PrinterFunc);
+void LogStackDump(FILE *log_file, stack_t *st, frmttd_print_t PrinterFunc);
 const char *StackErrGet(int st_err);
 const char *StackStatusGet(int st_status);
 void StackStatsPrint(stack_t *st);
@@ -109,6 +113,10 @@ int StackInit(stack_t *st, size_t capac
     ON_DBG(assert(name_f);
     assert(name_v);)
 
+    ON_DBG(st->f_name = name_f;
+    st->val_name = name_v;
+    st->line = ln;)
+
     if (InitCheck(st) != STACK_IS_OK) {
         return st->cur_err;
     }
@@ -119,11 +127,6 @@ int StackInit(stack_t *st, size_t capac
         st->cur_err = ECALLOC;
         return st->cur_err;
     }
-    ON_DBG(st->f_name = name_f;
-    st->val_name = name_v;
-    st->line = ln;
-    // MakePoison(st);
-    )
 
     MakePoison(st);
     st->status_stck = STATUS_EMPTY;
@@ -245,7 +248,7 @@ int StackDestroy(stack_t *st
     return st->cur_err;
 }
 
-void LogStackDump(FILE *log_file, stack_t *st, print_frmttd_t PrinterFunc) {
+void LogStackDump(FILE *log_file, stack_t *st, frmttd_print_t PrinterFunc) {
     assert(log_file);
     assert(st);
 
@@ -254,24 +257,21 @@ void LogStackDump(FILE *log_file, stack_t *st, print_frmttd_t PrinterFunc) {
     assert(err_got);
     assert(status_got);
     
-    ON_DBG(if (st->status_stck == STATUS_DESTROYED) {
-        fprintf(log_file, "Watching %s on line %d in %s:\n", st->val_name, st->line, st->f_name);
-        fprintf(log_file, "Its status is %s and current error is %s\n", status_got, err_got);
-    })
+    ON_DBG(fprintf(log_file, "Watching \"%s\" on line %d in %s:\n", st->val_name, st->line, st->f_name);
+        fprintf(log_file, "Its status is %s and current error is %s\n", status_got, err_got);)
 
     for (size_t i = 0; i < st->capacity; i++) {
-        fprintf(log_file, "%s[%llu] = ", 
-            (i > st->pos_stck) ? ((i == st->pos_stck) ? "->" : "  ") : "**", i);
+        fprintf(log_file, "        %s[%3llu] = ", 
+            (i >= st->pos_stck) ? ((i == st->pos_stck) ? "->" : "  ") : "**", i);
         if (i < st->pos_stck) {
             PrinterFunc(log_file, &st->stck[i]);
         }
         else {
-            fprintf(log_file, "%x", st->stck[i]);
+            fprintf(log_file, "%x (IMPLIED POISON)", st->stck[i]);
         }
         putc('\n', log_file);
     }
-
-    return ;
+    PRINT_BOUNDARY(log_file);
 }
 
 const char *StackErrGet(int st_err) {
