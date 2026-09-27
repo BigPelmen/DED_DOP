@@ -20,6 +20,11 @@
     fprintf(_fily_, "------------------------------------------------------------" \
         "----------------------------------------------------------------\n")
 
+const char DEFAULT_R_PATH[] = "Onegin_to_read.txt";
+const char DEFAULT_W_PATH[] = "Onegin_to_write.txt";
+const char BOUNDARY[] = "------------------------------------------------------------" \
+        "----------------------------------------------------------------\n";
+
 enum mode_print {
     TO_STDOUT,
     TO_DEBUG,
@@ -42,6 +47,7 @@ struct line_info {
 
 typedef int (*comparator_t)(const void *, const void *);
 
+void PrintFDescripted(int fd, size_t lines_amount, struct line_info changable_text[]);
 size_t GetLinesAmount(struct text_info *text);
 int GetFileInfoBuf(const char *name_f, int flags, mode_t f_mode, struct text_info *examined_text);
 int GetCheckedFile(const char *f_name, int flags, mode_t f_mode);
@@ -54,12 +60,26 @@ void Swap(void *a, void *b, size_t el_size);
 void PrintText(char *line_ptrs[], int NLines, int mode, FILE *where_write);
 void WriteFile(char *line_ptrs[], int NLines, FILE *w_file);
 
-int main() {
+int main(int argc, char const *argv[]) {
+    bool f_defined = true;
+    if (argc != 3) {
+        printf("Default file names will be used\n");
+        f_defined = false;
+    }
     struct text_info text1 = {};
-    if (GetFileInfoBuf("C:\\Users\\PelmenDi\\Desktop\\DED_DOP\\Onegin_to_read.txt", 
-        O_RDONLY, S_IRUSR, &text1) != 0) {
-			return 1;
-	}
+    int w_file_descr = 0;
+    if (!f_defined) {
+        if (GetFileInfoBuf(DEFAULT_R_PATH, O_RDONLY, S_IRUSR, &text1) != 0 || 
+            (w_file_descr = open(DEFAULT_W_PATH, O_WRONLY, S_IWUSR)) < 0) {
+            return 1;
+        }
+    }
+    else {
+        if (GetFileInfoBuf(argv[1], O_RDONLY, S_IRUSR, &text1) != 0 || 
+            (w_file_descr = open(argv[2], O_WRONLY, S_IWUSR)) < 0) {
+            return 1;
+        }
+    }
     
 	text1.lines_amount = GetLinesAmount(&text1);
     text1.lines = (struct line_info *)calloc(text1.lines_amount, sizeof(struct line_info));
@@ -70,22 +90,27 @@ int main() {
     assert(changable_text);
     memcpy(changable_text, text1.lines, sizeof(changable_text[0]) * text1.lines_amount);
 
-    MySort(changable_text, text1.lines_amount, sizeof(changable_text[0]), &MyStrCmpAlphasBacked);
-    fwrite(changable_text[100].line, sizeof(char), changable_text[0].line_len, stdout);
-    for (size_t i = 0; i < text1.lines_amount; i++) {
-        fwrite(changable_text[i].line, sizeof(char), changable_text[i].line_len, stdout);
-    }
+    MySort(changable_text, text1.lines_amount, sizeof(changable_text[0]), &MyStrCmpAlphas);
+    PrintFDescripted(w_file_descr, text1.lines_amount, changable_text);
 
     qsort(changable_text, text1.lines_amount, sizeof(changable_text[0]), &MyStrCmpAlphasBacked);
-    for (size_t i = 0; i < text1.lines_amount; i++) {
-        fwrite(changable_text[i].line, sizeof(char), changable_text[i].line_len, stdout);
-    }
+    PrintFDescripted(w_file_descr, text1.lines_amount, changable_text);
+
+    PrintFDescripted(w_file_descr, text1.lines_amount, text1.lines);
 
     MY_FREE(text1.lines);
     MY_FREE(text1.lines);
     MY_FREE(changable_text);
 
     return 0;
+}
+
+void PrintFDescripted(int fd, size_t lines_amount, struct line_info changable_text[]) {
+    for (size_t i = 0; i < lines_amount; i++) {
+        write(fd, changable_text[i].line, changable_text[i].line_len);
+    }
+    write(fd, "\n", 1);
+    write(fd, BOUNDARY, sizeof(BOUNDARY) - 1);
 }
 
 size_t GetLinesAmount(struct text_info *text) {
@@ -163,7 +188,7 @@ void GetLinePtrs(struct text_info *text) {
         if ((tmp = strchr((const char *)(last_found), '\n')) == NULL) {
             // printf("Inside f: %p\n", text->lines[0].line);
             text->lines[i].line = last_found;
-			size_t offset = strchr((const char *)(last_found), '\0') - last_found + 1;
+			size_t offset = strchr((const char *)(last_found), '\0') - last_found;
 			text->lines[i].line_len = offset;
             break;
         }
