@@ -13,28 +13,6 @@
 #include <unistd.h>
 #include <math.h>
 
-#define STACK_IS_OK 0
-#define MAX_REALLOC_CNTR 4
-#define POISON_BYTE 0xAA
-
-const size_t MAX_SAFE_CAPACITY = ULLONG_MAX / 2 - 1;
-
-typedef enum {
-    ESIZE_UPPER_CAPACITY = 1,
-    ESIZE_IS_NEGATIVE,
-    ECAPACITY_IS_NEGATIVE,
-    EALREADY_INIT,
-    ECALLOC,
-    EREALLOC,
-    EEMPTY_POP,
-} err_types_t;
-
-typedef enum {
-    STATUS_ACTIVE,
-    STATUS_DESTROYED,
-    STATUS_EMPTY,
-} status_t;
-
 // #define STACK_DEBUG
 
 #ifdef STACK_DEBUG
@@ -49,6 +27,36 @@ typedef enum {
     typedef int elem_t;
 #endif
 
+#define STACK_IS_OK 0
+#define MAX_REALLOC_CNTR 4
+#define POISON_BYTE 0xAA
+
+#ifdef DEF_STACK_TYPE
+    typedef DEF_STACK_TYPE elem_t;
+#else
+    typedef int elem_t;
+#endif
+
+typedef enum {
+    ESTACK_OK = STACK_IS_OK,
+    ESIZE_UPPER_CAPACITY,
+    ESIZE_IS_NEGATIVE,
+    ECAPACITY_IS_NEGATIVE,
+    EALREADY_INIT,
+    ECALLOC,
+    EREALLOC,
+    EEMPTY_POP,
+    EUNKNOWN,
+} err_types_t;
+
+typedef enum {
+    STATUS_ACTIVE,
+    STATUS_DESTROYED,
+    STATUS_EMPTY,
+} status_t;
+
+typedef void (*print_frmttd_t)(FILE *log_file, const void *element);
+
 typedef struct {
     ON_DBG(const char *f_name;
     const char *val_name;
@@ -60,6 +68,8 @@ typedef struct {
     int status_stck;
 } stack_t;
 
+const size_t MAX_SAFE_CAPACITY = ULLONG_MAX / 2 - 1;
+
 int Check(err_types_t reason);
 elem_t *MakePoison(stack_t *st);
 int StackInit(stack_t *st, size_t capac 
@@ -67,9 +77,13 @@ int StackInit(stack_t *st, size_t capac
 int InitCheck(stack_t *st);
 int StackPush(stack_t *st, elem_t val);
 elem_t StackPop(stack_t *st);
-int LogOpen(const char *f_name, int flags, mode_t mode);
+FILE *LogOpen(const char *f_name, const char *f_mode);
 int StackDestroy(stack_t *st 
-    ON_DBG(, const char name_f, int ln));
+    ON_DBG(, const char *name_f, int ln));
+void LogStackDump(FILE *log_file, stack_t *st, print_frmttd_t PrinterFunc);
+const char *StackErrGet(int st_err);
+const char *StackStatusGet(int st_status);
+void StackStatsPrint(stack_t *st);
 
 int Check(err_types_t reason) {
     
@@ -92,6 +106,8 @@ elem_t *MakePoison(stack_t *st) {
 int StackInit(stack_t *st, size_t capac 
     ON_DBG(, const char *name_f, const char *name_v, int ln)) {
     assert(st);
+    ON_DBG(assert(name_f);
+    assert(name_v);)
 
     if (InitCheck(st) != STACK_IS_OK) {
         return st->cur_err;
@@ -107,7 +123,8 @@ int StackInit(stack_t *st, size_t capac
     st->val_name = name_v;
     st->line = ln;
     // MakePoison(st);
-)
+    )
+
     MakePoison(st);
     st->status_stck = STATUS_EMPTY;
     st->cur_err = STACK_IS_OK;
@@ -187,12 +204,6 @@ elem_t StackPop(stack_t *st) {
     }
     // printf("Now poped %d, pos: %llu -> %llu\n", st->stck[st->pos_stck - 1], st->pos_stck, st->pos_stck - 1);
     memset(st->stck + st->pos_stck, POISON_BYTE, sizeof(st->stck[0]));
-    // if (st->pos_stck == 10) {
-    //     for (size_t i = 0; i < st->capacity; i++) {
-    //         printf("%d ", st->stck[i]);
-    //     }
-    //     putchar('\n');
-    // }
     if (st->pos_stck == 1) {
         memset(st->stck, POISON_BYTE, sizeof(st->stck[0]));
         st->status_stck = STATUS_EMPTY;
@@ -200,21 +211,25 @@ elem_t StackPop(stack_t *st) {
     return st->stck[--st->pos_stck];
 }
 
-int LogOpen(const char *f_name, int flags, mode_t mode) {
-    int log_fd = open(f_name, flags, mode);
-    if (log_fd < 0) {
-        fprintf(stderr, "File %s with %#x flags and %#x has not been opened or created\n" 
+FILE *LogOpen(const char *f_name, const char *f_mode) {
+    assert(f_name);
+    assert(f_mode);
+
+    FILE *log_f = fopen(f_name, f_mode);
+    if (log_f == NULL) {
+        fprintf(stderr, "File %s in %s mode has not been opened or created\n" 
             "Got a mistake and FAILED\n", 
-            f_name, flags, mode);
+            f_name, f_mode);
         fprintf(stderr, "ERROR %d: %s\n", errno, strerror(errno));
-        return -errno;
+        return NULL;
     }
-    return log_fd;
+    return log_f;
 }
 
 int StackDestroy(stack_t *st 
-    ON_DBG(, const char name_f, int ln)) {
+    ON_DBG(, const char *name_f, int ln)) {
     assert(st);
+    ON_DBG(assert(name_f);)
 
     ON_DBG(st->line = ln;
     st->f_name = name_f);
@@ -230,8 +245,80 @@ int StackDestroy(stack_t *st
     return st->cur_err;
 }
 
-// int LogStackDump(int log_fd, err_types_t err) {
-//     return ;
-// }
+void LogStackDump(FILE *log_file, stack_t *st, print_frmttd_t PrinterFunc) {
+    assert(log_file);
+    assert(st);
+
+    const char *err_got = StackErrGet(st->cur_err);
+    const char *status_got = StackStatusGet(st->status_stck);
+    assert(err_got);
+    assert(status_got);
+    
+    ON_DBG(if (st->status_stck == STATUS_DESTROYED) {
+        fprintf(log_file, "Watching %s on line %d in %s:\n", st->val_name, st->line, st->f_name);
+        fprintf(log_file, "Its status is %s and current error is %s\n", status_got, err_got);
+    })
+
+    for (size_t i = 0; i < st->capacity; i++) {
+        fprintf(log_file, "%s[%llu] = ", 
+            (i > st->pos_stck) ? ((i == st->pos_stck) ? "->" : "  ") : "**", i);
+        if (i < st->pos_stck) {
+            PrinterFunc(log_file, &st->stck[i]);
+        }
+        else {
+            fprintf(log_file, "%x", st->stck[i]);
+        }
+        putc('\n', log_file);
+    }
+
+    return ;
+}
+
+const char *StackErrGet(int st_err) {
+    switch (st_err) {
+    case ESTACK_OK:
+        return "STACK IS OK";
+    case ESIZE_UPPER_CAPACITY:
+        return "POSITION IS LARGER THAN CAPACITY";
+    case ESIZE_IS_NEGATIVE:
+        return "POSITION IS BELOW ZERO";
+    case ECAPACITY_IS_NEGATIVE:
+        return "CAPACITY IS BELOW ZERO";
+    case EALREADY_INIT:
+        return "THIS STACK HAS ALREADY BEEN INITIALIZED";
+    case ECALLOC:
+        return "CALLOC DURING INITIALIZATION FAILED";
+    case EREALLOC:
+        return "REALLOC DURING STACK RESIZING FAILED";
+    case EEMPTY_POP:
+        return "POP() FROM EMPTY STACK HAS BEEN TRIED";
+    case EUNKNOWN:
+        return "UNIDENTIFIED ERROR";
+    default:
+        return "UNKNOWN NUMBER OF ERROR";
+    };
+}
+
+const char *StackStatusGet(int st_status) {
+    switch (st_status) {
+    case STATUS_ACTIVE:
+        return "STACK IS ACTIVE AND HAS ELEMENT(-S) INSIDE";    
+    case STATUS_DESTROYED:
+        return "STACK HAS BEEN DESTROYED";
+    case STATUS_EMPTY:
+        return "STACK IS EMPTY";
+    default:
+        return "STACK HAS UNKNOWN STATUS";
+    };
+}
+
+void StackStatsPrint(stack_t *st) {
+    assert(st);
+
+    fprintf(stderr, "status = %d, error = %d, pos = %llu, capacity = %llu, pointer = %p" 
+        ON_DBG(", file = %s, name = %s, line = %d") "\n", 
+        st->status_stck, st->cur_err, st->pos_stck, st->capacity, st->stck
+        ON_DBG(, st->f_name, st->val_name, st->line));
+}
 
 #endif // STACK_H
