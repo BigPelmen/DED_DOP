@@ -28,7 +28,6 @@
 #endif
 
 #define STACK_IS_OK 0
-#define MAX_REALLOC_CNTR 4
 #define POISON_BYTE 0xAA
 
 #ifdef DEF_STACK_TYPE
@@ -46,6 +45,7 @@ typedef enum {
     EREALLOC,
     EEMPTY_POP,
     EBAD_STACK_PTR,
+    ECAPACITY_EXTR_CHANGE,
     EUNKNOWN,
 } err_types_t;
 
@@ -60,10 +60,13 @@ typedef void (*frmttd_print_t)(FILE *log_file, const void *element);
 typedef struct {
     ON_DBG(const char *f_name;
     const char *val_name;
-    int line;)
+    int line;
+    FILE *file_log;
+    frmttd_print_t LogPrinterFunc;)
     elem_t *stck;
     size_t pos_stck;
     size_t capacity;
+    size_t reserve_capacity;
     int cur_err;
     int status_stck;
 } stack_t;
@@ -77,10 +80,12 @@ const size_t MAX_SAFE_CAPACITY = ULLONG_MAX / 2 - 1;
 int StackGeneralCheck(stack_t *st);
 elem_t *MakePoison(stack_t *st);
 int StackInit(stack_t *st, size_t capac 
-    ON_DBG(, const char *name_f, const char *name_v, int ln));
+    ON_DBG(, const char *name_f, const char *name_v, int ln, FILE *logy_f, frmttd_print_t LogPrinter));
 int InitCheck(stack_t *st);
 int StackPush(stack_t *st, elem_t val);
+void PushDoubler(stack_t *st);
 elem_t StackPop(stack_t *st);
+void PopDivide(stack_t *st, size_t *hyster_offset);
 FILE *LogOpen(const char *f_name, const char *f_mode);
 int StackDestroy(stack_t *st 
     ON_DBG(, const char *name_f, int ln));
@@ -90,6 +95,8 @@ const char *StackStatusGet(int st_status);
 void StackStatsPrint(stack_t *st);
 
 int StackGeneralCheck(stack_t *st) {
+    assert(st);
+
     if (st->status_stck != STATUS_DESTROYED) {
         if (st->stck == NULL) {
             return EBAD_STACK_PTR;
@@ -102,6 +109,10 @@ int StackGeneralCheck(stack_t *st) {
             st->cur_err = ESIZE_UPPER_CAPACITY;
             return ESIZE_UPPER_CAPACITY;
         }
+        if (st->reserve_capacity != st->capacity) {
+            st->cur_err = ECAPACITY_EXTR_CHANGE;
+            return ECAPACITY_EXTR_CHANGE;
+        }
     }
     return EGENERALLY_STACK_OK;
 }
@@ -109,25 +120,31 @@ int StackGeneralCheck(stack_t *st) {
 elem_t *MakePoison(stack_t *st) {
     assert(st);
 
-    return (elem_t *)memset(st->stck + st->pos_stck, POISON_BYTE, 
-        (st->capacity - st->pos_stck) * sizeof(st->stck[0]));
-}
+    if (st->cur_err != EGENERALLY_STACK_OK || st->status_stck == STATUS_DESTROYED) {
+        return NULL;
+    }
 
+    elem_t *mems_check = (elem_t *)memset(st->stck + st->pos_stck, POISON_BYTE, 
+        (st->capacity - st->pos_stck) * sizeof(st->stck[0]));
+    return mems_check;
+}
 int StackInit(stack_t *st, size_t capac 
-    ON_DBG(, const char *name_f, const char *name_v, int ln)) {
+    ON_DBG(, const char *name_f, const char *name_v, int ln, FILE *logy_f, frmttd_print_t LogPrinter)) {
     assert(st);
     ON_DBG(assert(name_f);
     assert(name_v);)
 
     ON_DBG(st->f_name = name_f;
     st->val_name = name_v;
-    st->line = ln;)
-
+    st->line = ln;
+    st->file_log = logy_f;
+    st->LogPrinterFunc = LogPrinter;)
+    
     if (InitCheck(st) != STACK_IS_OK) {
         return st->cur_err;
     }
     st->pos_stck = 0;
-    st->capacity = capac;
+    st->capacity = st->reserve_capacity =  capac;
     st->stck = (elem_t *)calloc(capac, sizeof(elem_t));
     if (st->stck == NULL) {
         st->cur_err = ECALLOC;
@@ -154,38 +171,28 @@ int InitCheck(stack_t *st) {
     return STACK_IS_OK;
 }
 
-// int PushCheck(stack_t *st) {
-//     return ;
-// }
-
-// int PopCheck(stack_t *st) {
-//     return ;
-// }
-
 int StackPush(stack_t *st, elem_t val) {
     assert(st);
 
     if (StackGeneralCheck(st) != EGENERALLY_STACK_OK) {
+        ON_DBG(LogStackDump(st->file_log, st, st->LogPrinterFunc);)
         return st->cur_err;
     }
 
     if (st->pos_stck == MAX_SAFE_CAPACITY) {
         fprintf(stderr, "Warning: too large size\n");
     }
-    if (st->pos_stck + 2 > st->capacity) {
-        // printf("Increase. pos: %llu -> %llu, c: %llu -> %llu\n", st->pos_stck, st->pos_stck + 1, st->capacity, st->capacity * 2);
-        int realloc_cntr = 0;
-        while (st->pos_stck + 2 > st->capacity && 
-            realloc_cntr++ < MAX_REALLOC_CNTR && 
-            st->capacity * 2 < MAX_SAFE_CAPACITY) {
-            st->capacity *= 2;
-        }
-        st->stck = (elem_t *)realloc(st->stck, st->capacity * sizeof(elem_t));
-        if (st->stck == NULL) {
+
+    if (st->pos_stck + 2 > st->capacity && st->capacity * 2 < MAX_SAFE_CAPACITY) {
+        PushDoubler(st);
+        elem_t *ptr_realloc = (elem_t *)realloc(st->stck, st->capacity * sizeof(elem_t));
+        if (ptr_realloc == NULL) {
             st->cur_err = EREALLOC;
         }
+        st->stck = ptr_realloc;
         MakePoison(st);
     }
+
     if (st->pos_stck == 0) {
         st->status_stck = STATUS_ACTIVE;
     }
@@ -194,40 +201,51 @@ int StackPush(stack_t *st, elem_t val) {
     return st->cur_err;
 }
 
+void PushDoubler(stack_t *st) {
+    assert(st);
+
+    st->capacity *= 2;
+    st->reserve_capacity *= 2;
+}
+
 elem_t StackPop(stack_t *st) {
     assert(st);
 
     if (StackGeneralCheck(st) != EGENERALLY_STACK_OK) {
+        ON_DBG(LogStackDump(st->file_log, st, st->LogPrinterFunc);)
         return (elem_t)0;
     }
 
     if (st->pos_stck < 1 || st->status_stck == STATUS_EMPTY) {
         st->cur_err = EEMPTY_POP;
-        return st->stck[0];
+        ON_DBG(LogStackDump(st->file_log, st, st->LogPrinterFunc);)
+        return (elem_t)0;
     }
     size_t hyster_offset = (st->capacity % 2) ? st->capacity / 2 + 1 : st->capacity / 2;
     if (st->pos_stck < hyster_offset && st->capacity > 1) {
-        int realloc_cntr = 0;
-        // printf("hyster = %3llu, pos = %3llu, c = %3llu| Before\n", hyster_offset, st->pos_stck, st->capacity);
-        while (st->pos_stck < hyster_offset && 
-            realloc_cntr++ < MAX_REALLOC_CNTR && 
-            st->capacity > 1) {
-            st->capacity /= 2;
-            hyster_offset = (st->capacity % 2) ? st->capacity / 2 + 1 : st->capacity / 2;
-        }
-        // printf("hyster = %3llu, pos = %3llu, c = %3llu| After\n", hyster_offset, st->pos_stck, st->capacity);
-        st->stck = (elem_t *)realloc(st->stck, st->capacity * sizeof(elem_t));
-        if (st->stck == NULL) {
+        PopDivide(st, &hyster_offset);
+        elem_t *ptr_realloc = (elem_t *)realloc(st->stck, st->capacity * sizeof(elem_t));
+        if (ptr_realloc == NULL) {
             st->cur_err = EREALLOC;
         }
+        st->stck = ptr_realloc;   
     }
-    // printf("Now poped %d, pos: %llu -> %llu\n", st->stck[st->pos_stck - 1], st->pos_stck, st->pos_stck - 1);
+
     memset(st->stck + st->pos_stck, POISON_BYTE, sizeof(st->stck[0]));
     if (st->pos_stck == 1) {
         memset(st->stck, POISON_BYTE, sizeof(st->stck[0]));
         st->status_stck = STATUS_EMPTY;
     }
     return st->stck[--st->pos_stck];
+}
+
+void PopDivide(stack_t *st, size_t *hyster_offset) {
+    assert(st);
+    assert(hyster_offset);
+
+    st->capacity /= 2;
+    st->reserve_capacity /= 2;
+    *hyster_offset = (st->capacity % 2) ? st->capacity / 2 + 1 : st->capacity / 2;
 }
 
 FILE *LogOpen(const char *f_name, const char *f_mode) {
@@ -240,7 +258,7 @@ FILE *LogOpen(const char *f_name, const char *f_mode) {
             "Got a mistake and FAILED\n", 
             f_name, f_mode);
         fprintf(stderr, "ERROR %d: %s\n", errno, strerror(errno));
-        return NULL;
+        return stderr;
     }
     return log_f;
 }
@@ -249,19 +267,20 @@ int StackDestroy(stack_t *st
     ON_DBG(, const char *name_f, int ln)) {
     assert(st);
     ON_DBG(assert(name_f);)
-
+    
     StackGeneralCheck(st);
 
     ON_DBG(st->line = ln;
-    st->f_name = name_f);
-
+    st->f_name = name_f;
+    st->LogPrinterFunc = NULL;)
+    
     MakePoison(st);
     free(st->stck);
+
     st->stck = NULL;
 
-    st->capacity = 0;
-    st->pos_stck = 0;
-
+    st->capacity = st->reserve_capacity = st->pos_stck =  0;
+    
     st->status_stck = STATUS_DESTROYED;
     return st->cur_err;
 }
@@ -285,15 +304,10 @@ void LogStackDump(FILE *log_file, stack_t *st, frmttd_print_t PrinterFunc) {
     for (size_t i = 0; i < st->capacity; i++) {
         fprintf(log_file, "        %s[%3llu] = ", 
             (i >= st->pos_stck) ? ((i == st->pos_stck) ? "->" : "  ") : "**", i);
-        // if (i < st->pos_stck) {
         PrinterFunc(log_file, &st->stck[i]);
-        // }
-        // else {
         if (i >= st->pos_stck) {
             fprintf(log_file, " (IMPLIED POISON)");
         }
-        //     fprintf(log_file, "%x (IMPLIED POISON)", st->stck[i]);
-        // }
         putc('\n', log_file);
     }
     PRINT_BOUNDARY(log_file);
@@ -319,6 +333,8 @@ const char *StackErrGet(int st_err) {
         return "UNIDENTIFIED ERROR";
     case EBAD_STACK_PTR:
         return "BAD STACK POINTER";
+    case ECAPACITY_EXTR_CHANGE:
+        return "CAPACITY HAS BEEN UNPREDICTEDLY (EXTRINSICLY) CHANGED";
     default:
         return "UNKNOWN NUMBER OF ERROR";
     };
