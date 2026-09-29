@@ -38,14 +38,14 @@
 #endif
 
 typedef enum {
-    ESTACK_OK = STACK_IS_OK,
+    EGENERALLY_STACK_OK = STACK_IS_OK,
     ESIZE_UPPER_CAPACITY,
-    ESIZE_IS_NEGATIVE,
-    ECAPACITY_IS_NEGATIVE,
+    ECAPACITY_IS_ZERO,
     EALREADY_INIT,
     ECALLOC,
     EREALLOC,
     EEMPTY_POP,
+    EBAD_STACK_PTR,
     EUNKNOWN,
 } err_types_t;
 
@@ -74,7 +74,7 @@ typedef struct {
 
 const size_t MAX_SAFE_CAPACITY = ULLONG_MAX / 2 - 1;
 
-int Check(err_types_t reason);
+int StackGeneralCheck(stack_t *st);
 elem_t *MakePoison(stack_t *st);
 int StackInit(stack_t *st, size_t capac 
     ON_DBG(, const char *name_f, const char *name_v, int ln));
@@ -89,21 +89,27 @@ const char *StackErrGet(int st_err);
 const char *StackStatusGet(int st_status);
 void StackStatsPrint(stack_t *st);
 
-int Check(err_types_t reason) {
-    
-    switch (reason) {
-    case EEMPTY_POP:
-        break;
-    default:
-        break;
-    };
-    return 0;
+int StackGeneralCheck(stack_t *st) {
+    if (st->status_stck != STATUS_DESTROYED) {
+        if (st->stck == NULL) {
+            return EBAD_STACK_PTR;
+        }
+        if (st->capacity <= 0) {
+            st->cur_err = ECAPACITY_IS_ZERO;
+            return ECAPACITY_IS_ZERO;
+        }
+        if (st->pos_stck >= st->capacity) {
+            st->cur_err = ESIZE_UPPER_CAPACITY;
+            return ESIZE_UPPER_CAPACITY;
+        }
+    }
+    return EGENERALLY_STACK_OK;
 }
 
 elem_t *MakePoison(stack_t *st) {
     assert(st);
 
-    return (elem_t *)memset(st->stck + st->pos_stck + 1, POISON_BYTE, 
+    return (elem_t *)memset(st->stck + st->pos_stck, POISON_BYTE, 
         (st->capacity - st->pos_stck) * sizeof(st->stck[0]));
 }
 
@@ -125,7 +131,7 @@ int StackInit(stack_t *st, size_t capac
     st->stck = (elem_t *)calloc(capac, sizeof(elem_t));
     if (st->stck == NULL) {
         st->cur_err = ECALLOC;
-        return st->cur_err;
+        return ECALLOC;
     }
 
     MakePoison(st);
@@ -135,10 +141,12 @@ int StackInit(stack_t *st, size_t capac
 }
 
 int InitCheck(stack_t *st) {
+    assert(st);
+
     struct _heapinfo heap_inf = {};
     int heap_status = 0;
     while ((heap_status = _heapwalk(&heap_inf)) != _HEAPEND && heap_status != _HEAPEMPTY) {
-        if (heap_inf._pentry == st->stck) {
+        if ((elem_t *)heap_inf._pentry == st->stck) {
             st->cur_err = EALREADY_INIT;
             return EALREADY_INIT;
         }
@@ -156,6 +164,10 @@ int InitCheck(stack_t *st) {
 
 int StackPush(stack_t *st, elem_t val) {
     assert(st);
+
+    if (StackGeneralCheck(st) != EGENERALLY_STACK_OK) {
+        return st->cur_err;
+    }
 
     if (st->pos_stck == MAX_SAFE_CAPACITY) {
         fprintf(stderr, "Warning: too large size\n");
@@ -184,6 +196,10 @@ int StackPush(stack_t *st, elem_t val) {
 
 elem_t StackPop(stack_t *st) {
     assert(st);
+
+    if (StackGeneralCheck(st) != EGENERALLY_STACK_OK) {
+        return (elem_t)0;
+    }
 
     if (st->pos_stck < 1 || st->status_stck == STATUS_EMPTY) {
         st->cur_err = EEMPTY_POP;
@@ -234,6 +250,8 @@ int StackDestroy(stack_t *st
     assert(st);
     ON_DBG(assert(name_f);)
 
+    StackGeneralCheck(st);
+
     ON_DBG(st->line = ln;
     st->f_name = name_f);
 
@@ -252,6 +270,8 @@ void LogStackDump(FILE *log_file, stack_t *st, frmttd_print_t PrinterFunc) {
     assert(log_file);
     assert(st);
 
+    StackGeneralCheck(st);
+
     const char *err_got = StackErrGet(st->cur_err);
     const char *status_got = StackStatusGet(st->status_stck);
     assert(err_got);
@@ -263,12 +283,15 @@ void LogStackDump(FILE *log_file, stack_t *st, frmttd_print_t PrinterFunc) {
     for (size_t i = 0; i < st->capacity; i++) {
         fprintf(log_file, "        %s[%3llu] = ", 
             (i >= st->pos_stck) ? ((i == st->pos_stck) ? "->" : "  ") : "**", i);
-        if (i < st->pos_stck) {
-            PrinterFunc(log_file, &st->stck[i]);
+        // if (i < st->pos_stck) {
+        PrinterFunc(log_file, &st->stck[i]);
+        // }
+        // else {
+        if (i >= st->pos_stck) {
+            fprintf(log_file, " (IMPLIED POISON)");
         }
-        else {
-            fprintf(log_file, "%x (IMPLIED POISON)", st->stck[i]);
-        }
+        //     fprintf(log_file, "%x (IMPLIED POISON)", st->stck[i]);
+        // }
         putc('\n', log_file);
     }
     PRINT_BOUNDARY(log_file);
@@ -276,14 +299,12 @@ void LogStackDump(FILE *log_file, stack_t *st, frmttd_print_t PrinterFunc) {
 
 const char *StackErrGet(int st_err) {
     switch (st_err) {
-    case ESTACK_OK:
+    case EGENERALLY_STACK_OK:
         return "STACK IS OK";
     case ESIZE_UPPER_CAPACITY:
         return "POSITION IS LARGER THAN CAPACITY";
-    case ESIZE_IS_NEGATIVE:
-        return "POSITION IS BELOW ZERO";
-    case ECAPACITY_IS_NEGATIVE:
-        return "CAPACITY IS BELOW ZERO";
+    case ECAPACITY_IS_ZERO:
+        return "CAPACITY IS ZERO";
     case EALREADY_INIT:
         return "THIS STACK HAS ALREADY BEEN INITIALIZED";
     case ECALLOC:
@@ -294,6 +315,8 @@ const char *StackErrGet(int st_err) {
         return "POP() FROM EMPTY STACK HAS BEEN TRIED";
     case EUNKNOWN:
         return "UNIDENTIFIED ERROR";
+    case EBAD_STACK_PTR:
+        return "BAD STACK POINTER";
     default:
         return "UNKNOWN NUMBER OF ERROR";
     };
@@ -314,6 +337,8 @@ const char *StackStatusGet(int st_status) {
 
 void StackStatsPrint(stack_t *st) {
     assert(st);
+
+    StackGeneralCheck(st);
 
     fprintf(stderr, "status = %d, error = %d, pos = %llu, capacity = %llu, pointer = %p" 
         ON_DBG(", file = %s, name = %s, line = %d") "\n", 
