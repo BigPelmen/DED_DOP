@@ -280,6 +280,8 @@ void LogStackDump(FILE *log_file, stack_t *st, frmttd_print_t PrinterFunc) {
     ON_DBG(fprintf(log_file, "Watching \"%s\" on line %d in %s:\n", st->val_name, st->line, st->f_name);
         fprintf(log_file, "Its status is %s and current error is %s\n", status_got, err_got);)
 
+    fprintf(log_file, "Stack has capacity = %llu, position = %llu, and pointer = %p\n", 
+        st->capacity, st->pos_stck, st->stck);
     for (size_t i = 0; i < st->capacity; i++) {
         fprintf(log_file, "        %s[%3llu] = ", 
             (i >= st->pos_stck) ? ((i == st->pos_stck) ? "->" : "  ") : "**", i);
