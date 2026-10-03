@@ -19,13 +19,14 @@
 #define STACK_HASHES_ON
 #define STACK_CANARIES_ON
 
+#undef ON_DBG
 #ifdef STACK_DEBUG
     #define ON_DBG(...) __VA_ARGS__
 #else
     #define ON_DBG(...)
 #endif
 
-#undef HSHS_ON(...)
+#undef HSHS_ON
 #ifdef STACK_HASHES_ON
     #define HSHS_ON(...) __VA_ARGS__
     #define HASH_START_DJB2 5381
@@ -33,9 +34,11 @@
     #define HSHS_ON(...)
 #endif
 
-#undef CNRS_ON(...)
+#undef CNRS_ON
 #ifdef STACK_CANARIES_ON
     #define CNRS_ON(...) __VA_ARGS__
+    #define STACK_STRUCT_LEFT_CANARY 0xBEBADEDA
+    #define STACK_STRUCT_RIGHT_CANARY 0xDEDABEBA
 #else
     #define CNRS_ON(...)
 #endif
@@ -51,13 +54,12 @@
 #ifdef DEF_STACK_TYPE
     typedef DEF_STACK_TYPE elem_t;
 #else
-    typedef int elem_t;
+    #define DEFAULT_STACK_TYPE int
+    typedef DEFAULT_STACK_TYPE elem_t;
 #endif
 
 #define STACK_IS_OK 0
 #define POISON_BYTE 0xAA
-#define STACK_STRUCT_LEFT_CANARY 0xBEBADEDA
-#define STACK_STRUCT_RIGHT_CANARY 0xDEDABEBA
 
 #ifdef DEF_STACK_TYPE
     typedef DEF_STACK_TYPE elem_t;
@@ -135,8 +137,10 @@ typedef struct {
 size_t GetRAMFreeSize(void);
 size_t GetRAMTotalSize(void);
 int StackGeneralCheck(stack_t *st);
+
 int CheckDataCanaries(stack_t *st);
 int CheckStructCanaries(stack_t *st);
+
 HSHS_ON(
 uint32_t GetHashDJB2(stack_t *st, size_t byted_size);
 void CheckHashDJB2(stack_t *st, size_t byted_size, uint32_t ref_hash);
