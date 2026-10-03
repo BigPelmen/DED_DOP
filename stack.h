@@ -16,13 +16,29 @@
 #include <time.h>
 
 #define STACK_DEBUG
+#define STACK_HASHES_ON
+#define STACK_CANARIES_ON
 
-// #ifdef STACK_HASHES
-//     #define STACK_HASHES(...) __VA_ARGS__
-// #else
-//     #define STACK_HASHES(...)
-// #endif
+#ifdef STACK_DEBUG
+    #define ON_DBG(...) __VA_ARGS__
+#else
+    #define ON_DBG(...)
+#endif
 
+#undef HSHS_ON(...)
+#ifdef STACK_HASHES_ON
+    #define HSHS_ON(...) __VA_ARGS__
+    #define HASH_START_DJB2 5381
+#else
+    #define HSHS_ON(...)
+#endif
+
+#undef CNRS_ON(...)
+#ifdef STACK_CANARIES_ON
+    #define CNRS_ON(...) __VA_ARGS__
+#else
+    #define CNRS_ON(...)
+#endif
 
 #if defined(_WIN32) || defined(_WIN64)
     #include <windows.h>
@@ -30,12 +46,6 @@
     #ifndef _POSIX_VERSION
         #include <unistd.h>
     #endif
-#endif
-
-#ifdef STACK_DEBUG
-    #define ON_DBG(...) __VA_ARGS__
-#else
-    #define ON_DBG(...)
 #endif
 
 #ifdef DEF_STACK_TYPE
@@ -104,7 +114,7 @@ typedef struct {
     size_t pos_stck;
     size_t capacity;
     size_t reserve_capacity;
-    uint64_t hash_djb2;
+    HSHS_ON(uint32_t hash_djb2;)
     int cur_err;
     int status_stck;
     uint64_t right_struct_canary;
@@ -117,26 +127,27 @@ typedef struct {
 #define CANARIES_AMOUNT 2
 #define BYTE_SIZE 256
 #define DEFAULT_RAM_SIZE 1'073'741'824
+#define MAX_SAFE_CAPACITY ((DEFAULT_RAM_SIZE) / 2 - 1)
 
-// TODO Pros and cons using define and const alternative (in global scope) + example 
-// TODO Look for system stack size (1 - 8 Mb)
 // TODO MAKE MACROS FOR HASHES AND CANARIES
 // TODO Look for |= for errors method
-
-const size_t MAX_SAFE_CAPACITY = DEFAULT_RAM_SIZE / 2 - 1;
 
 size_t GetRAMFreeSize(void);
 size_t GetRAMTotalSize(void);
 int StackGeneralCheck(stack_t *st);
 int CheckDataCanaries(stack_t *st);
 int CheckStructCanaries(stack_t *st);
-uint64_t GetHashDJB2(stack_t *st, size_t byted_size);
-void CheckHashDJB2(stack_t *st, size_t byted_size, uint64_t ref_hash);
+HSHS_ON(
+uint32_t GetHashDJB2(stack_t *st, size_t byted_size);
+void CheckHashDJB2(stack_t *st, size_t byted_size, uint32_t ref_hash);
+)
 elem_t *MakePoison(stack_t *st);
 int StackInit(stack_t *st, size_t capac 
     ON_DBG(, const char *name_f, const char *name_v, int ln, FILE *logy_f, frmttd_print_t LogPrinter));
-ON_DBG(void DbgInitRoutine(stack_t *st, const char *name_f, const char *name_v, 
-    int ln, FILE *logy_f, frmttd_print_t LogPrinter);)
+ON_DBG(
+void DbgInitRoutine(stack_t *st, const char *name_f, const char *name_v, 
+    int ln, FILE *logy_f, frmttd_print_t LogPrinter);
+)
 int InitCheck(stack_t *st);
 void MakeCanaries(stack_t *st);
 int StackPush(stack_t *st, elem_t val);
@@ -159,7 +170,7 @@ size_t GetRAMFreeSize(void) {
             return mem_stats.ullAvailPhys;
         }
         fprintf(stderr, "FAILED TRY TO GET FREE MEMORY SIZE\n");
-        return 0;
+        return DEFAULT_RAM_SIZE;
     #elif defined(__unix__)
         int64_t page_size = sysconf(_SC_PAGE_SIZE);
         int64_t available_page_amount = sysconf(_SC_AVPHYS_PAGES);
@@ -259,26 +270,28 @@ int CheckStructCanaries(stack_t *st) {
     return STRUCT_CANARIES_OK;
 }
 
-uint64_t GetHashDJB2(stack_t *st, size_t byted_size) {
+HSHS_ON(
+uint32_t GetHashDJB2(stack_t *st, size_t byted_size) {
     assert(st);
-
+    
     st->hash_djb2 = 0;
-    const uint8_t *byted_data = (uint8_t *)st;
-    uint64_t hash = 5381; //TODO magic number // maybe const?
+    const uint8_t *byted_data = (const uint8_t *)st;
+    uint32_t hash = HASH_START_DJB2;
     for (size_t i = 0; i < byted_size; i++) {
         hash = ((hash << 5) + hash) + byted_data[i];
     }
+    st->hash_djb2 = hash;
     return hash;
 }
 
-void CheckHashDJB2(stack_t *st, size_t byted_size, uint64_t ref_hash) {
+void CheckHashDJB2(stack_t *st, size_t byted_size, uint32_t ref_hash) {
     assert(st);
 
-    uint64_t new_hash = GetHashDJB2(st, byted_size);
+    uint32_t new_hash = GetHashDJB2(st, byted_size);
     if (ref_hash != new_hash) {
         st->cur_err = EWRONG_HASH;
     }
-}
+})
 
 elem_t *MakePoison(stack_t *st) {
     assert(st);
@@ -328,7 +341,8 @@ int StackInit(stack_t *st, size_t capac
     return st->cur_err;
 }
 
-ON_DBG(void DbgInitRoutine(stack_t *st, const char *name_f, const char *name_v, 
+ON_DBG(
+    void DbgInitRoutine(stack_t *st, const char *name_f, const char *name_v, 
     int ln, FILE *logy_f, frmttd_print_t LogPrinter) {
     assert(st);
     assert(name_f);
