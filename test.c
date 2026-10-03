@@ -1,5 +1,9 @@
 #define DEF_STACK_TYPE double
 #define STACK_DEBUG
+#define STACK_HASHES_ON
+#define STACK_CANARIES_ON
+#define STACK_DEBUG
+#define STACK_UNSAFE_TRY_KILL_ON
 #include "stack.h"
 
 #define GET_NAME(var) #var
@@ -26,7 +30,7 @@ int main() {
     StackStatsPrint(&my_stck);
     LogStackDump(file_log, &my_stck, &DblStackPrint);
     StackStatsPrint(&my_stck);
-    StackDestroy(&my_stck, __FILE__, __LINE__);
+    StackDestroy(&my_stck ON_DBG(, __FILE__, __LINE__));
     StackStatsPrint(&my_stck);
 
     LogStackDump(file_log, &my_stck, &DblStackPrint);
