@@ -174,9 +174,6 @@ ON_HSHS(
     uint32_t GetHashDJB2(stack_t *st, size_t byted_size);
     void CheckHashDJB2(stack_t *st, size_t byted_size, uint32_t ref_hash);
 )
-elem_t *MakePoison(stack_t *st);
-int StackInit(stack_t *st, size_t capac 
-    ON_DBG(, const char *name_f, const char *name_v, int ln, FILE *logy_f, frmttd_print_t LogPrinter));
 ON_DBG(
     void DbgInitRoutine(stack_t *st, const char *name_f, const char *name_v, 
         int ln, FILE *logy_f, frmttd_print_t LogPrinter);
@@ -184,6 +181,9 @@ ON_DBG(
 #if defined(_WIN32) || defined(_WIN64)
     int InitCheck(stack_t *st);
 #endif // _WIN32 || _WIN64
+elem_t *MakePoison(stack_t *st);
+int StackInit(stack_t *st, size_t capac 
+    ON_DBG(, const char *name_f, const char *name_v, int ln, FILE *logy_f, frmttd_print_t LogPrinter));
 int InitCalloc(stack_t *st);
 int StackPush(stack_t *st, elem_t val);
 void PushDoubler(stack_t *st);
