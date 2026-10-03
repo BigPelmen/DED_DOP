@@ -12,8 +12,25 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <math.h>
+#include <inttypes.h>
+#include <time.h>
 
-// #define STACK_DEBUG
+#define STACK_DEBUG
+
+// #ifdef STACK_HASHES
+//     #define STACK_HASHES(...) __VA_ARGS__
+// #else
+//     #define STACK_HASHES(...)
+// #endif
+
+
+#if defined(_WIN32) || defined(_WIN64)
+    #include <windows.h>
+#elif defined(__unix__)
+    #ifndef _POSIX_VERSION
+        #include <unistd.h>
+    #endif
+#endif
 
 #ifdef STACK_DEBUG
     #define ON_DBG(...) __VA_ARGS__
@@ -29,6 +46,8 @@
 
 #define STACK_IS_OK 0
 #define POISON_BYTE 0xAA
+#define STACK_STRUCT_LEFT_CANARY 0xBEBADEDA
+#define STACK_STRUCT_RIGHT_CANARY 0xDEDABEBA
 
 #ifdef DEF_STACK_TYPE
     typedef DEF_STACK_TYPE elem_t;
@@ -46,8 +65,21 @@ typedef enum {
     EEMPTY_POP,
     EBAD_STACK_PTR,
     ECAPACITY_EXTR_CHANGE,
+    ELEFT_CANARY_DAMAGED,
+    ERIGHT_CANARY_DAMAGED,
+    ESIZE_NO_MATCH,
+    EWRONG_HASH,
+    ELEFT_STRUCT_DAMAGE,
+    ERIGHT_STRUCT_DAMAGE,
     EUNKNOWN,
 } err_types_t;
+
+typedef enum {
+    STRUCT_CANARIES_OK,
+    DATA_CANARIES_OK,
+    STRUCT_CANARIES_DAMAGED,
+    DATA_CANARIES_DAMAGED,
+} canaries_e_types_t;
 
 typedef enum {
     STATUS_ACTIVE,
@@ -58,30 +90,55 @@ typedef enum {
 typedef void (*frmttd_print_t)(FILE *log_file, const void *element);
 
 typedef struct {
+    uint64_t left_struct_canary;
     ON_DBG(const char *f_name;
     const char *val_name;
     int line;
     FILE *file_log;
     frmttd_print_t LogPrinterFunc;)
     elem_t *stck;
+    elem_t *all_data_allocated_buf_with_canaries;
+    elem_t *left_stck_canary;
+    elem_t *right_stck_canary;
+    size_t full_data_size;
     size_t pos_stck;
     size_t capacity;
     size_t reserve_capacity;
+    uint64_t hash_djb2;
     int cur_err;
     int status_stck;
+    uint64_t right_struct_canary;
 } stack_t;
 
 #define PRINT_BOUNDARY(log_file) \
     fprintf(log_file, "--------------------------------------------------" \
         "--------------------------------------------------\n")
 
-const size_t MAX_SAFE_CAPACITY = ULLONG_MAX / 2 - 1;
+#define CANARIES_AMOUNT 2
+#define BYTE_SIZE 256
+#define DEFAULT_RAM_SIZE 1'073'741'824
 
+// TODO Pros and cons using define and const alternative (in global scope) + example 
+// TODO Look for system stack size (1 - 8 Mb)
+// TODO MAKE MACROS FOR HASHES AND CANARIES
+// TODO Look for |= for errors method
+
+const size_t MAX_SAFE_CAPACITY = DEFAULT_RAM_SIZE / 2 - 1;
+
+size_t GetRAMFreeSize(void);
+size_t GetRAMTotalSize(void);
 int StackGeneralCheck(stack_t *st);
+int CheckDataCanaries(stack_t *st);
+int CheckStructCanaries(stack_t *st);
+uint64_t GetHashDJB2(stack_t *st, size_t byted_size);
+void CheckHashDJB2(stack_t *st, size_t byted_size, uint64_t ref_hash);
 elem_t *MakePoison(stack_t *st);
 int StackInit(stack_t *st, size_t capac 
     ON_DBG(, const char *name_f, const char *name_v, int ln, FILE *logy_f, frmttd_print_t LogPrinter));
+ON_DBG(void DbgInitRoutine(stack_t *st, const char *name_f, const char *name_v, 
+    int ln, FILE *logy_f, frmttd_print_t LogPrinter);)
 int InitCheck(stack_t *st);
+void MakeCanaries(stack_t *st);
 int StackPush(stack_t *st, elem_t val);
 void PushDoubler(stack_t *st);
 elem_t StackPop(stack_t *st);
@@ -94,11 +151,60 @@ const char *StackErrGet(int st_err);
 const char *StackStatusGet(int st_status);
 void StackStatsPrint(stack_t *st);
 
+size_t GetRAMFreeSize(void) {
+    #if defined(_WIN32) || defined(_WIN64)
+        MEMORYSTATUSEX mem_stats = {};
+        mem_stats.dwLength = sizeof(mem_stats);
+        if (GlobalMemoryStatusEx(&mem_stats)) {
+            return mem_stats.ullAvailPhys;
+        }
+        fprintf(stderr, "FAILED TRY TO GET FREE MEMORY SIZE\n");
+        return 0;
+    #elif defined(__unix__)
+        int64_t page_size = sysconf(_SC_PAGE_SIZE);
+        int64_t available_page_amount = sysconf(_SC_AVPHYS_PAGES);
+        if (page_size > 0 && available_page_amount > 0) {
+            return page_size * available_page_amount;
+        }
+        return DEFAULT_RAM_SIZE;
+    #else
+        return DEFAULT_RAM_SIZE;
+    #endif
+}
+
+size_t GetRAMTotalSize(void) {
+    #if defined(_WIN32) || defined(_WIN64)
+        MEMORYSTATUSEX mem_stats = {};
+        mem_stats.dwLength = sizeof(mem_stats);
+        if (GlobalMemoryStatusEx(&mem_stats)) {
+            return mem_stats.ullTotalPhys;
+        }
+        fprintf(stderr, "FAILED TRY TO GET FREE MEMORY SIZE\n");
+        return 0;
+    #elif defined(__unix__)
+        int64_t page_size = sysconf(_SC_PAGE_SIZE);
+        int64_t page_amount = sysconf(_SC_PHYS_PAGES);
+        if (page_size > 0 && available_page_amount > 0) {
+            return page_size * page_amount;
+        }
+        return DEFAULT_RAM_SIZE;
+    #else
+        return DEFAULT_RAM_SIZE;
+    #endif
+}
+
 int StackGeneralCheck(stack_t *st) {
     assert(st);
 
     if (st->status_stck != STATUS_DESTROYED) {
-        if (st->stck == NULL) {
+        if (CheckDataCanaries(st) == DATA_CANARIES_DAMAGED) {
+            return st->cur_err;
+        }
+        if (CheckStructCanaries(st) == STRUCT_CANARIES_DAMAGED) {
+            return st->cur_err;
+        }
+        if (st->stck == NULL || st->stck - CANARIES_AMOUNT / 2 != st->all_data_allocated_buf_with_canaries) {
+            st->cur_err = EBAD_STACK_PTR;
             return EBAD_STACK_PTR;
         }
         if (st->capacity <= 0) {
@@ -113,8 +219,65 @@ int StackGeneralCheck(stack_t *st) {
             st->cur_err = ECAPACITY_EXTR_CHANGE;
             return ECAPACITY_EXTR_CHANGE;
         }
+        if (st->full_data_size - CANARIES_AMOUNT != st->capacity) {
+            st->cur_err = ESIZE_NO_MATCH;
+            return ESIZE_NO_MATCH;
+        }
     }
     return EGENERALLY_STACK_OK;
+}
+
+int CheckDataCanaries(stack_t *st) {
+    assert(st);
+
+    if (st->left_stck_canary != st->all_data_allocated_buf_with_canaries || 
+        *st->left_stck_canary != *st->all_data_allocated_buf_with_canaries) {
+        st->cur_err = ELEFT_CANARY_DAMAGED;
+        return DATA_CANARIES_DAMAGED;
+    }
+    if (st->right_stck_canary != 
+        st->all_data_allocated_buf_with_canaries + st->full_data_size - CANARIES_AMOUNT / 2 || 
+        *st->right_stck_canary != 
+        *(st->all_data_allocated_buf_with_canaries + st->full_data_size - CANARIES_AMOUNT / 2)) {
+        st->cur_err = ERIGHT_CANARY_DAMAGED;
+        return DATA_CANARIES_DAMAGED;
+    }
+    return DATA_CANARIES_OK;
+}
+
+int CheckStructCanaries(stack_t *st) {
+    assert(st);
+
+    if (st->left_struct_canary != STACK_STRUCT_LEFT_CANARY) {
+        st->cur_err = ELEFT_STRUCT_DAMAGE;
+        return STRUCT_CANARIES_DAMAGED;
+    }
+    if (st->right_struct_canary != STACK_STRUCT_RIGHT_CANARY) {
+        st->cur_err = ERIGHT_STRUCT_DAMAGE;
+        return STRUCT_CANARIES_DAMAGED;
+    }
+    return STRUCT_CANARIES_OK;
+}
+
+uint64_t GetHashDJB2(stack_t *st, size_t byted_size) {
+    assert(st);
+
+    st->hash_djb2 = 0;
+    const uint8_t *byted_data = (uint8_t *)st;
+    uint64_t hash = 5381; //TODO magic number // maybe const?
+    for (size_t i = 0; i < byted_size; i++) {
+        hash = ((hash << 5) + hash) + byted_data[i];
+    }
+    return hash;
+}
+
+void CheckHashDJB2(stack_t *st, size_t byted_size, uint64_t ref_hash) {
+    assert(st);
+
+    uint64_t new_hash = GetHashDJB2(st, byted_size);
+    if (ref_hash != new_hash) {
+        st->cur_err = EWRONG_HASH;
+    }
 }
 
 elem_t *MakePoison(stack_t *st) {
@@ -128,34 +291,57 @@ elem_t *MakePoison(stack_t *st) {
         (st->capacity - st->pos_stck) * sizeof(st->stck[0]));
     return mems_check;
 }
+
 int StackInit(stack_t *st, size_t capac 
     ON_DBG(, const char *name_f, const char *name_v, int ln, FILE *logy_f, frmttd_print_t LogPrinter)) {
     assert(st);
     ON_DBG(assert(name_f);
     assert(name_v);)
 
-    ON_DBG(st->f_name = name_f;
-    st->val_name = name_v;
-    st->line = ln;
-    st->file_log = logy_f;
-    st->LogPrinterFunc = LogPrinter;)
+    if (capac == 0) {
+        st->cur_err = ECAPACITY_IS_ZERO;
+        return ECAPACITY_IS_ZERO;
+    }
+    
+    ON_DBG(DbgInitRoutine(st, name_f, name_v, ln, logy_f, LogPrinter);)
     
     if (InitCheck(st) != STACK_IS_OK) {
         return st->cur_err;
     }
     st->pos_stck = 0;
     st->capacity = st->reserve_capacity =  capac;
-    st->stck = (elem_t *)calloc(capac, sizeof(elem_t));
-    if (st->stck == NULL) {
+    st->full_data_size = st->capacity + CANARIES_AMOUNT;
+    elem_t *tmp_ptr = (elem_t *)calloc(st->full_data_size, sizeof(elem_t));
+    if (tmp_ptr == NULL) {
         st->cur_err = ECALLOC;
         return ECALLOC;
     }
 
+    st->all_data_allocated_buf_with_canaries = tmp_ptr;
+    st->stck = tmp_ptr + (CANARIES_AMOUNT / 2);
+
     MakePoison(st);
+    MakeCanaries(st);
+    st->left_struct_canary = STACK_STRUCT_LEFT_CANARY, st->right_struct_canary = STACK_STRUCT_RIGHT_CANARY;
     st->status_stck = STATUS_EMPTY;
     st->cur_err = STACK_IS_OK;
     return st->cur_err;
 }
+
+ON_DBG(void DbgInitRoutine(stack_t *st, const char *name_f, const char *name_v, 
+    int ln, FILE *logy_f, frmttd_print_t LogPrinter) {
+    assert(st);
+    assert(name_f);
+    assert(name_v);
+    assert(logy_f);
+    assert(LogPrinter);
+
+    st->f_name = name_f;
+    st->val_name = name_v;
+    st->line = ln;
+    st->file_log = logy_f;
+    st->LogPrinterFunc = LogPrinter;
+})
 
 int InitCheck(stack_t *st) {
     assert(st);
@@ -165,10 +351,30 @@ int InitCheck(stack_t *st) {
     while ((heap_status = _heapwalk(&heap_inf)) != _HEAPEND && heap_status != _HEAPEMPTY) {
         if ((elem_t *)heap_inf._pentry == st->stck) {
             st->cur_err = EALREADY_INIT;
+            ON_DBG(LogStackDump(st->file_log, st, st->LogPrinterFunc);)            
             return EALREADY_INIT;
         }
     }
     return STACK_IS_OK;
+}
+
+void MakeCanaries(stack_t *st) {
+    assert(st);
+    srand(time(NULL));
+
+    memset(st->all_data_allocated_buf_with_canaries, 0, 1);
+    memset(st->all_data_allocated_buf_with_canaries + st->full_data_size - 1, 0, 1);
+
+    size_t el_size_without_byte = sizeof(elem_t) - 1;
+    if (el_size_without_byte > 0) {
+        memset((uint8_t *)st->all_data_allocated_buf_with_canaries + 1, 
+            (unsigned)rand() % BYTE_SIZE, el_size_without_byte);
+        memset((uint8_t *)st->all_data_allocated_buf_with_canaries + ((st->full_data_size - 1) * sizeof(elem_t)) + 1, 
+            (unsigned)rand() % BYTE_SIZE, el_size_without_byte);
+    }
+    
+    st->left_stck_canary = st->all_data_allocated_buf_with_canaries;
+    st->right_stck_canary = st->all_data_allocated_buf_with_canaries + st->full_data_size - 1;
 }
 
 int StackPush(stack_t *st, elem_t val) {
@@ -179,18 +385,19 @@ int StackPush(stack_t *st, elem_t val) {
         return st->cur_err;
     }
 
-    if (st->pos_stck == MAX_SAFE_CAPACITY) {
-        fprintf(stderr, "Warning: too large size\n");
-    }
+    if (st->pos_stck + 2 > st->capacity && st->capacity * 2 + CANARIES_AMOUNT < MAX_SAFE_CAPACITY) {
 
-    if (st->pos_stck + 2 > st->capacity && st->capacity * 2 < MAX_SAFE_CAPACITY) {
-        PushDoubler(st);
-        elem_t *ptr_realloc = (elem_t *)realloc(st->stck, st->capacity * sizeof(elem_t));
+        PushDoubler(st); 
+        elem_t *ptr_realloc = (elem_t *)realloc(st->all_data_allocated_buf_with_canaries, 
+            st->full_data_size * sizeof(elem_t));
         if (ptr_realloc == NULL) {
             st->cur_err = EREALLOC;
         }
-        st->stck = ptr_realloc;
+
+        st->all_data_allocated_buf_with_canaries = ptr_realloc;
+        st->stck = ptr_realloc + CANARIES_AMOUNT / 2;
         MakePoison(st);
+        MakeCanaries(st);
     }
 
     if (st->pos_stck == 0) {
@@ -205,7 +412,9 @@ void PushDoubler(stack_t *st) {
     assert(st);
 
     st->capacity *= 2;
+    st->full_data_size = st->capacity + CANARIES_AMOUNT;
     st->reserve_capacity *= 2;
+    
 }
 
 elem_t StackPop(stack_t *st) {
@@ -221,22 +430,30 @@ elem_t StackPop(stack_t *st) {
         ON_DBG(LogStackDump(st->file_log, st, st->LogPrinterFunc);)
         return (elem_t)0;
     }
+
     size_t hyster_offset = (st->capacity % 2) ? st->capacity / 2 + 1 : st->capacity / 2;
     if (st->pos_stck < hyster_offset && st->capacity > 1) {
         PopDivide(st, &hyster_offset);
-        elem_t *ptr_realloc = (elem_t *)realloc(st->stck, st->capacity * sizeof(elem_t));
+        elem_t *ptr_realloc = (elem_t *)realloc(st->all_data_allocated_buf_with_canaries, 
+            st->full_data_size * sizeof(elem_t));
         if (ptr_realloc == NULL) {
             st->cur_err = EREALLOC;
         }
-        st->stck = ptr_realloc;   
+        st->all_data_allocated_buf_with_canaries = ptr_realloc;
+        st->stck = ptr_realloc + CANARIES_AMOUNT / 2;
+        
+        MakeCanaries(st);
+        
     }
 
+    elem_t reserve = st->stck[--st->pos_stck];
     memset(st->stck + st->pos_stck, POISON_BYTE, sizeof(st->stck[0]));
-    if (st->pos_stck == 1) {
-        memset(st->stck, POISON_BYTE, sizeof(st->stck[0]));
+    if (st->pos_stck == 0) {
         st->status_stck = STATUS_EMPTY;
     }
-    return st->stck[--st->pos_stck];
+    // fprintf(stderr, "%llu) %lg, %lg and %lg, %lg\n", st->pos_stck, *st->left_stck_canary, *st->right_stck_canary, 
+    //         *st->all_data_allocated_buf_with_canaries, *(st->all_data_allocated_buf_with_canaries + st->full_data_size - 1));
+    return reserve;
 }
 
 void PopDivide(stack_t *st, size_t *hyster_offset) {
@@ -244,6 +461,7 @@ void PopDivide(stack_t *st, size_t *hyster_offset) {
     assert(hyster_offset);
 
     st->capacity /= 2;
+    st->full_data_size = st->capacity + 2;
     st->reserve_capacity /= 2;
     *hyster_offset = (st->capacity % 2) ? st->capacity / 2 + 1 : st->capacity / 2;
 }
@@ -275,11 +493,11 @@ int StackDestroy(stack_t *st
     st->LogPrinterFunc = NULL;)
     
     MakePoison(st);
-    free(st->stck);
+    free(st->all_data_allocated_buf_with_canaries);
+    st->stck = st->all_data_allocated_buf_with_canaries = NULL;
+    st->left_stck_canary = st->right_stck_canary = NULL;
 
-    st->stck = NULL;
-
-    st->capacity = st->reserve_capacity = st->pos_stck =  0;
+    st->full_data_size = st->capacity = st->reserve_capacity = st->pos_stck = 0;
     
     st->status_stck = STATUS_DESTROYED;
     return st->cur_err;
@@ -301,15 +519,29 @@ void LogStackDump(FILE *log_file, stack_t *st, frmttd_print_t PrinterFunc) {
 
     fprintf(log_file, "Stack has capacity = %llu, position = %llu, and pointer = %p\n", 
         st->capacity, st->pos_stck, st->stck);
-    for (size_t i = 0; i < st->capacity; i++) {
-        fprintf(log_file, "        %s[%3llu] = ", 
-            (i >= st->pos_stck) ? ((i == st->pos_stck) ? "->" : "  ") : "**", i);
-        PrinterFunc(log_file, &st->stck[i]);
-        if (i >= st->pos_stck) {
-            fprintf(log_file, " (IMPLIED POISON)");
+    fprintf(log_file, "Debug and check information: full size = %llu, full data pointer = %p\n", 
+        st->full_data_size, st->all_data_allocated_buf_with_canaries);
+    
+    
+    if (st->status_stck != STATUS_DESTROYED) {
+        fprintf(log_file, "        CL[|||] = %p: ", st->left_stck_canary);
+        PrinterFunc(log_file, st->left_stck_canary);
+        fprintf(log_file, "\n");
+        for (size_t i = 0; i < st->capacity; i++) {
+            fprintf(log_file, "        %s[%3llu] = ", 
+                (i >= st->pos_stck) ? ((i == st->pos_stck) ? "->" : "  ") : "**", i);
+            PrinterFunc(log_file, &st->stck[i]);
+            if (i >= st->pos_stck) {
+                fprintf(log_file, " (IMPLIED POISON)");
+            }
+            fprintf(log_file, "\n");
         }
-        putc('\n', log_file);
+        fprintf(log_file, "        CR[|||] = %p: ", st->right_stck_canary);
+        PrinterFunc(log_file, st->right_stck_canary);
     }
+    fprintf(log_file, "\n");
+    fprintf(log_file, "Ends on %p adress (after last allocated elem_t element of all stack data)\n", 
+            st->all_data_allocated_buf_with_canaries + st->full_data_size);
     PRINT_BOUNDARY(log_file);
 }
 
@@ -335,6 +567,18 @@ const char *StackErrGet(int st_err) {
         return "BAD STACK POINTER";
     case ECAPACITY_EXTR_CHANGE:
         return "CAPACITY HAS BEEN UNPREDICTEDLY (EXTRINSICLY) CHANGED";
+    case ELEFT_CANARY_DAMAGED:
+        return "LEFT CANARY HAS BEEN DAMAGED";
+    case ERIGHT_CANARY_DAMAGED:
+        return "RIGHT CANARY HAS BEEN DAMAGED";
+    case ESIZE_NO_MATCH:
+        return "FULL SIZE DOES NOT MATCH THE INFORMATIVE ONE";
+    case EWRONG_HASH:
+        return "STRUCT HASH HAS BEEN UNPREDICTEDLY (EXTRINSICLY) CHANGED";
+    case ELEFT_STRUCT_DAMAGE:
+        return "THE STRUCTURE HAS BEEN DAMAGED FROM THE LEFT";
+    case ERIGHT_STRUCT_DAMAGE:
+        return "THE STRUCTURE HAS BEEN DAMAGED FROM THE RIGHT";
     default:
         return "UNKNOWN NUMBER OF ERROR";
     };
