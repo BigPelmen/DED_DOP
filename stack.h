@@ -94,6 +94,8 @@
 #define STACK_IS_OK 0
 #define POISON_BYTE 0xAA
 
+// ANCHOR - enums section start
+
 typedef enum {
     EGENERALLY_STACK_OK = STACK_IS_OK,
     ESIZE_UPPER_CAPACITY = 1 << 1,
@@ -130,6 +132,8 @@ typedef enum {
 
 typedef void (*frmttd_print_t)(FILE *log_file, const void *element);
 
+// ANCHOR - Main stack struct
+
 typedef struct {
     ON_CNRS(uint64_t left_struct_canary;)
     ON_DBG(const char *f_name;
@@ -155,12 +159,16 @@ typedef struct {
     fprintf(log_file, "--------------------------------------------------" \
         "--------------------------------------------------\n")
 
+// ANCHOR - Some #define constants
+
 #define BYTE_SIZE 256
 #define DEFAULT_RAM_SIZE 1'073'741'824
 #define MAX_SAFE_CAPACITY ((DEFAULT_RAM_SIZE) / 2 - 1)
 
 // TODO Look for |= for errors method
 // TODO IMPLEMENT HASHES
+
+// ANCHOR - Functions' prototypes
 
 size_t GetRAMFreeSize(void);
 size_t GetRAMTotalSize(void);
@@ -200,6 +208,8 @@ void DumpStackContent(stack_t *st, FILE *log_file, frmttd_print_t PrinterFunc);
 const char *StackErrGet(int st_err);
 const char *StackStatusGet(int st_status);
 void StackStatsPrint(stack_t *st);
+
+// ANCHOR - Memory functions
 
 size_t GetRAMFreeSize(void) {
     #if defined(_WIN32) || defined(_WIN64)
@@ -243,6 +253,8 @@ size_t GetRAMTotalSize(void) {
         return DEFAULT_RAM_SIZE;
     #endif
 }
+
+// ANCHOR - Checker-functions
 
 int StackGeneralCheck(stack_t *st) {
     assert(st);
@@ -362,6 +374,8 @@ ON_HSHS(
         }
     }
 )
+
+// ANCHOR - Main functions
 
 elem_t *MakePoison(stack_t *st) {
     assert(st);
@@ -580,22 +594,6 @@ int PopRealloc(stack_t *st) {
     return st->cur_err;
 }
 
-FILE *LogOpen(const char *f_name, const char *f_mode) {
-    assert(f_name);
-    assert(f_mode);
-
-    FILE *log_f = fopen(f_name, f_mode);
-    if (log_f == NULL) {
-        fprintf(stderr, "File %s in %s mode has not been opened or created\n" 
-            "Got a mistake and FAILED\n", 
-            f_name, f_mode);
-        fprintf(stderr, "ERROR %d: %s\n", errno, strerror(errno));
-        return stderr;
-    }
-
-    return log_f;
-}
-
 int StackDestroy(stack_t *st 
     ON_DBG(, const char *name_f, int ln)) {
     assert(st);
@@ -626,6 +624,24 @@ int StackDestroy(stack_t *st
     
     st->status_stck = STATUS_DESTROYED;
     return st->cur_err;
+}
+
+// ANCHOR - Dumper-functions
+
+FILE *LogOpen(const char *f_name, const char *f_mode) {
+    assert(f_name);
+    assert(f_mode);
+
+    FILE *log_f = fopen(f_name, f_mode);
+    if (log_f == NULL) {
+        fprintf(stderr, "File %s in %s mode has not been opened or created\n" 
+            "Got a mistake and FAILED\n", 
+            f_name, f_mode);
+        fprintf(stderr, "ERROR %d: %s\n", errno, strerror(errno));
+        return stderr;
+    }
+
+    return log_f;
 }
 
 void LogStackDump(FILE *log_file, stack_t *st, frmttd_print_t PrinterFunc) {
