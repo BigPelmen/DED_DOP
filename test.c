@@ -2,7 +2,7 @@
 #define STACK_DEBUG
 #define STACK_HASHES_ON
 #define STACK_CANARIES_ON
-#define STACK_UNSAFE_TRY_KILL_ON
+#define STACK_STRICT_PTR
 #include "stack.h"
 
 #define GET_NAME(var) #var

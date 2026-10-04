@@ -17,7 +17,7 @@
 // #define STACK_DEBUG
 // #define STACK_HASHES_ON
 // #define STACK_CANARIES_ON
-// #define STACK_UNSAFE_TRY_KILL_ON
+// #define STACK_STRICT_PTR
 
 #undef ON_DBG
 #ifdef STACK_DEBUG
@@ -70,7 +70,7 @@
 #endif // STACK_CANARIES_ON
 
 #undef ON_NSF_TR
-#ifdef STACK_UNSAFE_TRY_KILL_ON
+#ifdef STACK_STRICT_PTR
     #define ON_NSF_TR(...) __VA_ARGS__
 #else
     #define ON_NSF_TR(...)
@@ -166,7 +166,6 @@ typedef struct {
 #define MAX_SAFE_CAPACITY ((DEFAULT_RAM_SIZE) / 2 - 1)
 
 // TODO Look for |= for errors method
-// TODO IMPLEMENT HASHES
 
 // ANCHOR - Functions' prototypes
 
@@ -180,7 +179,7 @@ ON_CNRS(
 )
 ON_HSHS(
     uint32_t GetHashDJB2(stack_t *st, size_t byted_size);
-    void CheckHashDJB2(stack_t *st, size_t byted_size, uint32_t ref_hash);
+    int CheckHashDJB2(stack_t *st, size_t byted_size);
 )
 ON_DBG(
     void DbgInitRoutine(stack_t *st, const char *name_f, const char *name_v, 
@@ -192,12 +191,13 @@ ON_DBG(
 elem_t *MakePoison(stack_t *st);
 int StackInit(stack_t *st, size_t capac 
     ON_DBG(, const char *name_f, const char *name_v, int ln, FILE *logy_f, frmttd_print_t LogPrinter));
-int InitCalloc(stack_t *st);
+elem_t *InitCalloc(stack_t *st);
 int StackPush(stack_t *st, elem_t val);
 void PushDoubler(stack_t *st);
+elem_t *PushRealloc(stack_t *st);
 elem_t StackPop(stack_t *st);
 void PopDivide(stack_t *st, size_t *hyster_offset);
-int PopRealloc(stack_t *st);
+elem_t *PopRealloc(stack_t *st);
 FILE *LogOpen(const char *f_name, const char *f_mode);
 int StackDestroy(stack_t *st 
     ON_DBG(, const char *name_f, int ln));
@@ -292,6 +292,11 @@ int StackGeneralCheck(stack_t *st) {
                 return ESIZE_NO_MATCH;
             }
         )
+        ON_HSHS(
+            if (CheckHashDJB2(st, sizeof(stack_t)) == EWRONG_HASH) {
+                return EWRONG_HASH;
+            }
+        )
     }
     return EGENERALLY_STACK_OK;
 }
@@ -365,13 +370,16 @@ ON_HSHS(
         return hash;
     }
 
-    void CheckHashDJB2(stack_t *st, size_t byted_size, uint32_t ref_hash) {
+    int CheckHashDJB2(stack_t *st, size_t byted_size) {
         assert(st);
 
+        uint32_t ref_hash = st->hash_djb2;
         uint32_t new_hash = GetHashDJB2(st, byted_size);
         if (ref_hash != new_hash) {
             st->cur_err = EWRONG_HASH;
+            return EWRONG_HASH;
         }
+        return st->cur_err;
     }
 )
 
@@ -411,17 +419,9 @@ int StackInit(stack_t *st, size_t capac
     st->pos_stck = 0;
     st->capacity = st->reserve_capacity =  capac;
     ON_CNRS(st->full_data_size = st->capacity + CANARIES_AMOUNT;)
-    #ifdef STACK_CANARIES_ON
-        elem_t *tmp_ptr = (elem_t *)calloc(st->full_data_size, sizeof(elem_t));
-    #else
-        elem_t *tmp_ptr = (elem_t *)calloc(st->capacity, sizeof(elem_t));
-    #endif // STACK_CANARIES_ON
-    if (tmp_ptr == NULL) {
-        st->cur_err = ECALLOC;
-        return ECALLOC;
-    }
-
-    if (InitCalloc(st) != EGENERALLY_STACK_OK) {
+    
+    elem_t *tmp_ptr = NULL;
+    if ((tmp_ptr = InitCalloc(st)) == NULL) {
         ON_DBG(LogStackDump(st->file_log, st, st->LogPrinterFunc);)
         return ECALLOC;
     }
@@ -435,25 +435,27 @@ int StackInit(stack_t *st, size_t capac
         st->left_struct_canary = STACK_STRUCT_LEFT_CANARY, st->right_struct_canary = STACK_STRUCT_RIGHT_CANARY;
     )
     st->status_stck = STATUS_EMPTY;
-    st->cur_err = STACK_IS_OK;
+    st->cur_err = EGENERALLY_STACK_OK;
+
+    ON_HSHS(GetHashDJB2(st, sizeof(stack_t));)
     return st->cur_err;
 }
 
 ON_DBG(
     void DbgInitRoutine(stack_t *st, const char *name_f, const char *name_v, 
-    int ln, FILE *logy_f, frmttd_print_t LogPrinter) {
-    assert(st);
-    assert(name_f);
-    assert(name_v);
-    assert(logy_f);
-    assert(LogPrinter);
+        int ln, FILE *logy_f, frmttd_print_t LogPrinter) {
+        assert(st);
+        assert(name_f);
+        assert(name_v);
+        assert(logy_f);
+        assert(LogPrinter);
 
-    st->f_name = name_f;
-    st->val_name = name_v;
-    st->line = ln;
-    st->file_log = logy_f;
-    st->LogPrinterFunc = LogPrinter;
-}
+        st->f_name = name_f;
+        st->val_name = name_v;
+        st->line = ln;
+        st->file_log = logy_f;
+        st->LogPrinterFunc = LogPrinter;
+    }
 )
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -473,7 +475,7 @@ ON_DBG(
     }
 #endif // _WIN32 || _WIN64
 
-int InitCalloc(stack_t *st) {
+elem_t *InitCalloc(stack_t *st) {
     assert(st);
 
     #ifdef STACK_CANARIES_ON
@@ -481,11 +483,7 @@ int InitCalloc(stack_t *st) {
     #else
         elem_t *tmp_ptr = (elem_t *)calloc(st->capacity, sizeof(elem_t));
     #endif // STACK_CANARIES_ON
-    if (tmp_ptr == NULL) {
-        st->cur_err = ECALLOC;
-        return ECALLOC;
-    }
-    return st->cur_err;
+    return tmp_ptr;
 }
 
 int StackPush(stack_t *st, elem_t val) {
@@ -498,15 +496,11 @@ int StackPush(stack_t *st, elem_t val) {
 
     if (st->pos_stck + 2 > st->capacity && st->capacity * 2 ON_CNRS(+ CANARIES_AMOUNT) < MAX_SAFE_CAPACITY) {
         PushDoubler(st); 
-        #ifdef STACK_CANARIES_ON
-            elem_t *ptr_realloc = (elem_t *)realloc(st->all_data_allocated_buf_with_canaries, 
-                st->full_data_size * sizeof(elem_t));
-        #else
-            elem_t *ptr_realloc = (elem_t *)realloc(st->stck, 
-                st->capacity * sizeof(elem_t));
-        #endif // STACK_CANARIES_ON
-        if (ptr_realloc == NULL) {
+        elem_t *ptr_realloc = NULL;
+        if ((ptr_realloc = PushRealloc(st)) == NULL) {
             st->cur_err = EREALLOC;
+            ON_DBG(LogStackDump(st->file_log, st, st->LogPrinterFunc);)
+            return EREALLOC;
         }
         
         ON_CNRS(st->all_data_allocated_buf_with_canaries = ptr_realloc;)
@@ -520,6 +514,7 @@ int StackPush(stack_t *st, elem_t val) {
     }
     st->stck[st->pos_stck++] = val;
     
+    ON_HSHS(GetHashDJB2(st, sizeof(stack_t));)
     return st->cur_err;
 }
 
@@ -529,7 +524,17 @@ void PushDoubler(stack_t *st) {
     st->capacity *= 2;
     ON_CNRS(st->full_data_size = st->capacity + CANARIES_AMOUNT;)
     st->reserve_capacity *= 2;
-    
+}
+
+elem_t *PushRealloc(stack_t *st) {
+    #ifdef STACK_CANARIES_ON
+        elem_t *ptr_realloc = (elem_t *)realloc(st->all_data_allocated_buf_with_canaries, 
+            st->full_data_size * sizeof(elem_t));
+    #else
+        elem_t *ptr_realloc = (elem_t *)realloc(st->stck, 
+            st->capacity * sizeof(elem_t));
+    #endif // STACK_CANARIES_ON
+    return ptr_realloc;
 }
 
 elem_t StackPop(stack_t *st) {
@@ -549,10 +554,15 @@ elem_t StackPop(stack_t *st) {
     size_t hyster_offset = (st->capacity % 2) ? st->capacity / 2 + 1 : st->capacity / 2;
     if (st->pos_stck < hyster_offset && st->capacity > 1) {
         PopDivide(st, &hyster_offset);
-        if (PopRealloc(st) != EGENERALLY_STACK_OK) {
-            ON_DBG(LogStackDump(st->file_log, st, st->LogPrinterFunc);)
-            return (elem_t)0;
+        elem_t *ptr_realloc = NULL;
+        if ((ptr_realloc = PopRealloc(st)) == NULL) {
+            st->cur_err = EREALLOC;
+            return EREALLOC;
         }
+
+        ON_CNRS(st->all_data_allocated_buf_with_canaries = ptr_realloc;)
+        st->stck = ptr_realloc ON_CNRS(+ CANARIES_AMOUNT / 2);
+        ON_CNRS(MakeCanaries(st);)
     }
 
     elem_t reserve = st->stck[--st->pos_stck];
@@ -561,6 +571,7 @@ elem_t StackPop(stack_t *st) {
         st->status_stck = STATUS_EMPTY;
     }
     
+    ON_HSHS(GetHashDJB2(st, sizeof(stack_t));)
     return reserve;
 }
 
@@ -574,7 +585,7 @@ void PopDivide(stack_t *st, size_t *hyster_offset) {
     *hyster_offset = (st->capacity % 2) ? st->capacity / 2 + 1 : st->capacity / 2;
 }
 
-int PopRealloc(stack_t *st) {
+elem_t *PopRealloc(stack_t *st) {
     assert(st);
 
     #ifdef STACK_CANARIES_ON
@@ -583,15 +594,7 @@ int PopRealloc(stack_t *st) {
     #else
         elem_t *ptr_realloc = (elem_t *)realloc(st->stck, st->capacity * sizeof(elem_t));
     #endif // STACK_CANARIES_ON
-    if (ptr_realloc == NULL) {
-        st->cur_err = EREALLOC;
-        return EREALLOC;
-    }
-
-    ON_CNRS(st->all_data_allocated_buf_with_canaries = ptr_realloc;)
-    st->stck = ptr_realloc ON_CNRS(+ CANARIES_AMOUNT / 2);
-    ON_CNRS(MakeCanaries(st);)
-    return st->cur_err;
+    return ptr_realloc;
 }
 
 int StackDestroy(stack_t *st 
@@ -623,6 +626,7 @@ int StackDestroy(stack_t *st
     ON_CNRS(st->full_data_size =) st->capacity = st->reserve_capacity = st->pos_stck = 0;
     
     st->status_stck = STATUS_DESTROYED;
+    ON_HSHS(GetHashDJB2(st, sizeof(stack_t));)
     return st->cur_err;
 }
 
