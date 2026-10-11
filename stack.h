@@ -293,7 +293,8 @@ int StackGeneralCheck(stack_t *st) {
             }
         )
         ON_HSHS(
-            if (CheckHashDJB2(st, sizeof(stack_t)) == EWRONG_HASH) {
+            if (st->cur_err == EGENERALLY_STACK_OK && 
+                CheckHashDJB2(st, sizeof(stack_t)) == EWRONG_HASH) {
                 return EWRONG_HASH;
             }
         )

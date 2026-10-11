@@ -11,6 +11,12 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <math.h>
+#define DEF_STACK_TYPE double
+#define STACK_DEBUG
+#define STACK_HASHES_ON
+#define STACK_CANARIES_ON
+#define STACK_STRICT_PTR
+#include "stack.h"
 
 #define DBL_CMP_EPS 1e-5
 
@@ -25,18 +31,24 @@ bool DoubleZeroCheck(double dbl);
 void Swap(void *a, void *b, size_t el_size);
 
 int main() {
-    int massive_int[] = {12, 21, 21, -23, 3, 4, 10, 1};
-    double massive_dbl[] = {3.21, -21.0, 12e-3, 0.0, 1.0, -1.0};
-    MyQuickSort(massive_dbl, sizeof(massive_dbl) / sizeof(massive_dbl[0]), sizeof(massive_dbl[0]), &CmpDbl);
-    for (size_t i = 0; i < sizeof(massive_dbl) / sizeof(massive_dbl[0]); i++) {
-        printf("%lg ", massive_dbl[i]);
-    }
-    putchar('\n');
-    MyQuickSort(massive_int, sizeof(massive_int) / sizeof(massive_int[0]), sizeof(massive_int[0]), &CmpInt);
-    for (size_t i = 0; i < sizeof(massive_int) / sizeof(massive_int[0]); i++) {
-        printf("%d ", massive_int[i]);
-    }
-    putchar('\n');
+//     printf("Total = %lg\nAvailable = %lg", 
+//         GetRAMTotalSize() / 1024 / 1024 / 1024.0, GetRAMFreeSize() / 1024 / 1024 / 1024.0);
+
+    stack_t st = {};
+    StackInit(&st, 1 ON_DBG(, __FILE__, GET_NAME(st), __LINE__, file_log, &DblStackPrint));
+    
+    // int massive_int[] = {12, 21, 21, -23, 3, 4, 10, 1};
+    // double massive_dbl[] = {3.21, -21.0, 12e-3, 0.0, 1.0, -1.0};
+    // MyQuickSort(massive_dbl, sizeof(massive_dbl) / sizeof(massive_dbl[0]), sizeof(massive_dbl[0]), &CmpDbl);
+    // for (size_t i = 0; i < sizeof(massive_dbl) / sizeof(massive_dbl[0]); i++) {
+    //     printf("%lg ", massive_dbl[i]);
+    // }
+    // putchar('\n');
+    // MyQuickSort(massive_int, sizeof(massive_int) / sizeof(massive_int[0]), sizeof(massive_int[0]), &CmpInt);
+    // for (size_t i = 0; i < sizeof(massive_int) / sizeof(massive_int[0]); i++) {
+    //     printf("%d ", massive_int[i]);
+    // }
+    // putchar('\n');
     return 0;
 }
 
