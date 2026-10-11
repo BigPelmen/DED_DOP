@@ -2,8 +2,8 @@
 
 #define DEF_STACK_TYPE int
 #define STACK_DEBUG
-// #define STACK_HASHES_ON
-// #define STACK_CANARIES_ON
+#define STACK_HASHES_ON
+#define STACK_CANARIES_ON
 #define STACK_STRICT_PTR
 #include "stack.h"
 #include "Comms.h"
@@ -21,6 +21,7 @@ typedef enum {
     SUB_ERROR_GOT = 1 << 2,
     MULT_ERROR_GOT = 1 << 3,
     DIV_ERROR_GOT = 1 << 4,
+    JMP_ERROR_GOT = 1 << 5,
     OUT_ERROR_GOT = 1 << (sizeof(int) * 8 - 2),
     HLT_ERROR_GOT = 1 << (sizeof(int) * 8 - 1),
 } exit_code_t;
@@ -49,8 +50,14 @@ size_t GetFileSize(int fd);
 int *ReadBytedBuf(char *buf, size_t lines_amount, size_t *real_len);
 void ProcInit(procsr_t *proc, int *b_code ON_DBG(, int ln, FILE *file_log));
 int RunCode(procsr_t *prc);
-int CodeOffset(int com);
 int RunOperation(procsr_t *prc);
+int JmpCom(procsr_t *prc, int jmp_label);
+int JaCom(procsr_t *prc, int jmp_label);
+int JaeCom(procsr_t *prc, int jmp_label);
+int JbCom(procsr_t *prc, int jmp_label);
+int JbeCom(procsr_t *prc, int jmp_label);
+int JeCom(procsr_t *prc, int jmp_label);
+int JneCom(procsr_t *prc, int jmp_label);
 int PushCom(stack_t *st, elem_t el);
 int Multiply(stack_t *st);
 int Divide(stack_t *st);
@@ -89,7 +96,7 @@ int main() {
     }
     res_buf_ptr[transferred - 1] = '\0';
     size_t real_len = 0;
-    int *by_co = ReadBytedBuf(res_buf_ptr, 3, &real_len);
+    int *by_co = ReadBytedBuf(res_buf_ptr, 100, &real_len);
     if (by_co == NULL) {
         return 1;
     }
@@ -132,6 +139,7 @@ int *ReadBytedBuf(char *buf, size_t lines_amount, size_t *real_len) {
             com = com * 10 + ((*buf++) - '0');
         }
         if (*real_len >= max_len) {
+            printf("%llu\n", *real_len);
             fprintf(stderr, "TOO LONG CODE IN BUFFER\n");
             free(b_c_tmp);
             return NULL;
@@ -150,6 +158,7 @@ int *ReadBytedBuf(char *buf, size_t lines_amount, size_t *real_len) {
         free(b_c_tmp);
         return NULL;
     }
+    // printf("REAL LEN: %llu\n", *real_len);
     return b_c_res;
 }
 
@@ -157,7 +166,7 @@ void ProcInit(procsr_t *prc, int *b_code ON_DBG(, int ln, FILE *file_log)) {
     assert(prc);
     ON_DBG(assert(file_log);)
 
-    StackInit(&prc->proc_stck, 32 
+    StackInit(&prc->proc_stck, 10 
         ON_DBG(, __FILE__, GET_NAME(prc), ln, file_log, &IntStackPrint));
     prc->pc = 0;
     prc->rgstr.ax = 0, prc->rgstr.bx = 0, prc->rgstr.cx = 0, prc->rgstr.dx = 0;
@@ -183,7 +192,7 @@ int RunCode(procsr_t *prc) {
     int offset = 0;
     int err = 0;
     while (true) {
-        offset = CodeOffset(prc->byte_code[prc->pc]);
+        offset = GetCodeOffset(prc->byte_code[prc->pc]);
         if (offset == HLT_COM_OFFSET) {
             if ((err & ~NORMAL_PERFORM) != 0) {
                 fprintf(stderr, "PROCESS ENDED WITH EXIT CODE: %#x", err);
@@ -204,8 +213,7 @@ int RunOperation(procsr_t *prc) {
     case HLT_COM:
         return (SoftHalt(&prc->proc_stck) == OPERATION_FAIL) ? HLT_ERROR_GOT : NORMAL_PERFORM;
     case PUSH_COM:
-        return (PushCom(&prc->proc_stck, prc->byte_code[prc->pc + 1]) == OPERATION_FAIL) ? 
-            PUSH_ERROR_GOT : NORMAL_PERFORM;
+        return (PushCom(&prc->proc_stck, prc->byte_code[prc->pc + 1]) == OPERATION_FAIL) ? PUSH_ERROR_GOT : NORMAL_PERFORM;
     case ADD_COM:
         return (Add(&prc->proc_stck) == OPERATION_FAIL) ? ADD_ERROR_GOT : NORMAL_PERFORM;
     case SUB_COM:
@@ -214,36 +222,155 @@ int RunOperation(procsr_t *prc) {
         return (Multiply(&prc->proc_stck) == OPERATION_FAIL) ? MULT_ERROR_GOT : NORMAL_PERFORM;
     case DIV_COM:
         return (Divide(&prc->proc_stck) == OPERATION_FAIL) ? DIV_ERROR_GOT : NORMAL_PERFORM;
+    case JMP_COM:
+        return (JmpCom(prc, prc->byte_code[prc->pc + 1]) == OPERATION_FAIL) ? JMP_ERROR_GOT : NORMAL_PERFORM;
+    case JA_COM:
+        return (JaCom(prc, prc->byte_code[prc->pc + 1]) == OPERATION_FAIL) ? JMP_ERROR_GOT : NORMAL_PERFORM;
+    case JAE_COM:
+        return (JaeCom(prc, prc->byte_code[prc->pc + 1]) == OPERATION_FAIL) ? JMP_ERROR_GOT : NORMAL_PERFORM;
+    case JB_COM:
+        return (JbCom(prc, prc->byte_code[prc->pc + 1]) == OPERATION_FAIL) ? JMP_ERROR_GOT : NORMAL_PERFORM;
+    case JBE_COM:
+        return (JbeCom(prc, prc->byte_code[prc->pc + 1]) == OPERATION_FAIL) ? JMP_ERROR_GOT : NORMAL_PERFORM;
+    case JE_COM:
+        return (JeCom(prc, prc->byte_code[prc->pc + 1]) == OPERATION_FAIL) ? JMP_ERROR_GOT : NORMAL_PERFORM;
+    case JNE_COM:
+        return (JneCom(prc, prc->byte_code[prc->pc + 1]) == OPERATION_FAIL) ? JMP_ERROR_GOT : NORMAL_PERFORM;    
     case WRONG_COMMAND_COM:
         return HLT_ERROR_GOT;
     }
     return HLT_ERROR_GOT;
 }
 
-int CodeOffset(int com) {
-    switch (com) {
-    case OUT_COM:
-        return 1;
-    case HLT_COM:
-        return HLT_COM_OFFSET;
-    case PUSH_COM:
-        return 2;
-    case ADD_COM:
-        return 1;
-    case SUB_COM:
-        return 1;
-    case MULT_COM:
-        return 1;
-    case DIV_COM:
-        return 1;
-    case WRONG_COMMAND_COM:
-        return 1;
+
+int JmpCom(procsr_t *prc, int jmp_label) {
+    assert(prc);
+
+    prc->pc = jmp_label;
+    ON_PRC_IFS(
+        if (0 > prc->byte_code[prc->pc] || prc->byte_code[prc->pc] >= WRONG_COMMAND_COM) {
+            fprintf(stderr, "WRONG LABEL: %d\n", prc->byte_code[prc->pc]);
+            return OPERATION_FAIL;
+        }
+    )
+    else {
+        prc->pc += 2;
     }
-    return 1;
+    return OPERATION_OK;
+}
+
+//NOTE - 
+int JaCom(procsr_t *prc, int jmp_label) {
+    int el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
+    if (el1 > el2) {
+        prc->pc = jmp_label;
+        ON_PRC_IFS(
+            if (0 > prc->byte_code[prc->pc] || prc->byte_code[prc->pc] >= WRONG_COMMAND_COM) {
+                printf("%d and %d\n", 0 > prc->byte_code[prc->pc], prc->byte_code[prc->pc] >= WRONG_COMMAND_COM);
+                fprintf(stderr, "WRONG LABEL: %d\n", prc->byte_code[prc->pc]);
+                return OPERATION_FAIL;
+            }
+        )
+    }
+    else {
+        prc->pc += 2;
+    }
+    return OPERATION_OK;
+}
+
+int JaeCom(procsr_t *prc, int jmp_label) {
+    int el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
+    if (el1 >= el2) {
+        prc->pc = jmp_label;
+        ON_PRC_IFS(
+            if (0 > prc->byte_code[prc->pc] || prc->byte_code[prc->pc] >= WRONG_COMMAND_COM) {
+                printf("%d and %d\n", 0 > prc->byte_code[prc->pc], prc->byte_code[prc->pc] >= WRONG_COMMAND_COM);
+                fprintf(stderr, "WRONG LABEL: %d\n", prc->byte_code[prc->pc]);
+                return OPERATION_FAIL;
+            }
+        )
+    }
+    else {
+        prc->pc += 2;
+    }
+    return OPERATION_OK;
+}
+
+int JbCom(procsr_t *prc, int jmp_label) {
+    int el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
+    if (el1 < el2) {
+        prc->pc = jmp_label;
+        ON_PRC_IFS(
+            if (0 > prc->byte_code[prc->pc] || prc->byte_code[prc->pc] >= WRONG_COMMAND_COM) {
+                printf("%d and %d\n", 0 > prc->byte_code[prc->pc], prc->byte_code[prc->pc] >= WRONG_COMMAND_COM);
+                fprintf(stderr, "WRONG LABEL: %d\n", prc->byte_code[prc->pc]);
+                return OPERATION_FAIL;
+            }
+        )
+    }
+    else {
+        prc->pc += 2;
+    }
+    return OPERATION_OK;
+}
+
+int JbeCom(procsr_t *prc, int jmp_label) {
+    int el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
+    if (el1 <= el2) {
+        prc->pc = jmp_label;
+        ON_PRC_IFS(
+            if (0 > prc->byte_code[prc->pc] || prc->byte_code[prc->pc] >= WRONG_COMMAND_COM) {
+                printf("%d and %d\n", 0 > prc->byte_code[prc->pc], prc->byte_code[prc->pc] >= WRONG_COMMAND_COM);
+                fprintf(stderr, "WRONG LABEL: %d\n", prc->byte_code[prc->pc]);
+                return OPERATION_FAIL;
+            }
+        )
+    }
+    else {
+        prc->pc += 2;
+    }
+    return OPERATION_OK;
+}
+
+int JeCom(procsr_t *prc, int jmp_label) {
+    int el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
+    if (el1 == el2) {
+        prc->pc = jmp_label;
+        ON_PRC_IFS(
+            if (0 > prc->byte_code[prc->pc] || prc->byte_code[prc->pc] >= WRONG_COMMAND_COM) {
+                printf("%d and %d\n", 0 > prc->byte_code[prc->pc], prc->byte_code[prc->pc] >= WRONG_COMMAND_COM);
+                fprintf(stderr, "WRONG LABEL: %d\n", prc->byte_code[prc->pc]);
+                return OPERATION_FAIL;
+            }
+        )
+    }
+    else {
+        prc->pc += 2;
+    }
+    return OPERATION_OK;
+}
+
+int JneCom(procsr_t *prc, int jmp_label) {
+    int el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
+    if (el1 != el2) {
+        prc->pc = jmp_label;
+        ON_PRC_IFS(
+            if (0 > prc->byte_code[prc->pc] || prc->byte_code[prc->pc] >= WRONG_COMMAND_COM) {
+                printf("%d and %d\n", 0 > prc->byte_code[prc->pc], prc->byte_code[prc->pc] >= WRONG_COMMAND_COM);
+                fprintf(stderr, "WRONG LABEL: %d\n", prc->byte_code[prc->pc]);
+                return OPERATION_FAIL;
+            }
+        )
+    }
+    else {
+        prc->pc += 2;
+    }
+    return OPERATION_OK;
 }
 
 int PushCom(stack_t *st, elem_t el) {
     assert(st);
+
     ON_PRC_IFS(
         if (StackPush(st, el) != EGENERALLY_STACK_OK || 
             st->cur_err != EGENERALLY_STACK_OK) {
@@ -251,6 +378,7 @@ int PushCom(stack_t *st, elem_t el) {
             return OPERATION_FAIL;
         }
     )
+
     return OPERATION_OK;
 }
 

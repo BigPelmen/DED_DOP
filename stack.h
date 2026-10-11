@@ -540,7 +540,7 @@ elem_t *PushRealloc(stack_t *st) {
 
 elem_t StackPop(stack_t *st) {
     assert(st);
-
+    
     if (StackGeneralCheck(st) != EGENERALLY_STACK_OK) {
         ON_DBG(LogStackDump(st->file_log, st, st->LogPrinterFunc);)
         return (elem_t)0;
