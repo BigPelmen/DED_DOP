@@ -1,6 +1,8 @@
 #ifndef COMMS_H
 #define COMMS_H
 
+// TODO PUSH DOES NOT WORK CORRECTLY WITH [ABX] COMBINATION - IT WILL JUST TAKE THE NUMBER OF THE REGISTR
+
 #include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
@@ -18,6 +20,10 @@ typedef enum {
     OUT_COM,
     HLT_COM,
     PUSH_COM,
+    PUSHR_COM,
+    PUSHM_COM,
+    POPR_COM,
+    POPM_COM,
     ADD_COM,
     SUB_COM,
     MULT_COM,
@@ -29,6 +35,8 @@ typedef enum {
     JBE_COM,
     JE_COM,
     JNE_COM,
+    // CALL_COM,
+    // RET_COM,
     WRONG_COMMAND_COM,
 } command_t;
 
@@ -37,6 +45,7 @@ typedef enum {
 #define NO_ARG_OFFSET 1
 #define JMP_OFFSET 0
 #define CODE_LINE_MULTIPLIER 5
+#define REGS_DEPTH 4
 
 #undef GET_NAME
 #define GET_NAME(var) #var
@@ -44,6 +53,8 @@ typedef enum {
 int GetFDesc(const char *f_name, int flags, mode_t f_mode);
 size_t GetFileSize(int fd);
 int GetCodeOffset(int com);
+void SpacesSkip(char **buf);
+void GraphemeSkip(char **buf);
 
 int GetFDesc(const char *f_name, int flags, mode_t f_mode) {
     assert(f_name);
@@ -76,6 +87,14 @@ int GetCodeOffset(int com) {
         return HLT_COM_OFFSET;
     case PUSH_COM:
         return ONE_ARG_OFFSET;
+    case PUSHR_COM:
+        return ONE_ARG_OFFSET;
+    case PUSHM_COM:
+        return ONE_ARG_OFFSET;
+    case POPR_COM:
+        return ONE_ARG_OFFSET;
+    case POPM_COM:
+        return ONE_ARG_OFFSET;
     case ADD_COM:
         return NO_ARG_OFFSET;
     case SUB_COM:
@@ -104,5 +123,20 @@ int GetCodeOffset(int com) {
     return NO_ARG_OFFSET;
 }
 
+void SpacesSkip(char **buf) {
+    assert(buf);
+
+    while (isspace(**buf) && **buf != '\0') {
+        (*buf)++;
+    }
+}
+
+void GraphemeSkip(char **buf) {
+    assert(buf);
+
+    while (!isspace(**buf) && **buf != '\0') {
+        (*buf)++;
+    }
+}
 
 #endif // COMMS_H

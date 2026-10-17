@@ -1,11 +1,17 @@
-PUSH 10
-PUSH 10
-JE :1
-PUSH 20
 PUSH 0
-MULT
-ADD
-:1
-PUSH 9
-OUT
+POP AX
+    :1
+    PUSH AX
+    PUSH 10
+    JB :2
+        PUSH AX
+        PUSH AX
+        MULT
+        OUT
+        PUSH AX
+        PUSH 2
+        ADD
+        POP AX
+        JMP :1
+:2
 HLT
