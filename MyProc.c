@@ -25,6 +25,8 @@ typedef enum {
     MULT_ERROR_GOT = 1 << 4,
     DIV_ERROR_GOT = 1 << 5,
     JMP_ERROR_GOT = 1 << 6,
+    IN_ERROR_GOT = 1 << 7,
+    CALL_ERROR_GOT = 1 << 8,
     OUT_ERROR_GOT = 1 << (sizeof(int) * 8 - 2),
     HLT_ERROR_GOT = 1 << (sizeof(int) * 8 - 1),
 } exit_code_t;
@@ -59,25 +61,27 @@ int *ReadBytedBuf(char *buf, size_t lines_amount, size_t *real_len);
 void ProcInit(procsr_t *proc, int *b_code ON_DBG(, int ln, FILE *file_log));
 int RunCode(procsr_t *prc);
 int RunOperation(procsr_t *prc);
-int JmpCom(procsr_t *prc, int jmp_label);
-int JaCom(procsr_t *prc, int jmp_label);
-int JaeCom(procsr_t *prc, int jmp_label);
-int JbCom(procsr_t *prc, int jmp_label);
-int JbeCom(procsr_t *prc, int jmp_label);
-int JeCom(procsr_t *prc, int jmp_label);
-int JneCom(procsr_t *prc, int jmp_label);
-int PushCom(stack_t *st, elem_t el);
+int JmpCom(procsr_t *prc);
+int JaCom(procsr_t *prc);
+int JaeCom(procsr_t *prc);
+int JbCom(procsr_t *prc);
+int JbeCom(procsr_t *prc);
+int JeCom(procsr_t *prc);
+int JneCom(procsr_t *prc);
+int PushCom(procsr_t *prc);
+int PushrCom(procsr_t *prc);
+int PushmCom(procsr_t *prc);
 int PoprCom(procsr_t *prc);
 int PopmCom(procsr_t *prc);
-int Multiply(stack_t *st);
-int Divide(stack_t *st);
-int Add(stack_t *st);
-int Subtract(stack_t *st);
-int OutputRes(stack_t *st);
-int InputRes(stack_t *st);
-int CallCom(procsr_t *prc, int call_label);
+int Multiply(procsr_t *prc);
+int Divide(procsr_t *prc);
+int Add(procsr_t *prc);
+int Subtract(procsr_t *prc);
+int OutputRes(procsr_t *prc);
+int InputRes(procsr_t *prc);
+int CallCom(procsr_t *prc);
 int RetCom(procsr_t *prc);
-int SoftHalt(stack_t *st);
+int SoftHalt(procsr_t *prc);
 void ProcDestroy(procsr_t *prc ON_DBG(, const char *f_name, int ln));
 void IntStackPrint(FILE *f_log, const void *element);
 
@@ -273,47 +277,47 @@ int RunOperation(procsr_t *prc) {
 
     switch (prc->byte_code[prc->pc]) {
     case OUT_COM:
-        return (OutputRes(&prc->proc_stck)) ? NORMAL_PERFORM : OUT_ERROR_GOT;
+        return (OutputRes(prc)) ? NORMAL_PERFORM : OUT_ERROR_GOT;
     case HLT_COM:
-        return (SoftHalt(&prc->proc_stck)) ? NORMAL_PERFORM : HLT_ERROR_GOT;
+        return (SoftHalt(prc)) ? NORMAL_PERFORM : HLT_ERROR_GOT;
     case PUSH_COM:
-        return (PushCom(&prc->proc_stck, prc->byte_code[prc->pc + 1])) ? NORMAL_PERFORM : PUSH_ERROR_GOT;
+        return (PushCom(prc)) ? NORMAL_PERFORM : PUSH_ERROR_GOT;
     case PUSHR_COM:
-        return (PushCom(&prc->proc_stck, prc->rgstr[prc->byte_code[prc->pc + 1]])) ? NORMAL_PERFORM : PUSH_ERROR_GOT;
+        return (PushrCom(prc)) ? NORMAL_PERFORM : PUSH_ERROR_GOT;
     case PUSHM_COM:
-        return (PushCom(&prc->proc_stck, prc->ram[prc->byte_code[prc->pc + 1]])) ? NORMAL_PERFORM : PUSH_ERROR_GOT;
+        return (PushmCom(prc)) ? NORMAL_PERFORM : PUSH_ERROR_GOT;
     case POPR_COM:
         return (PoprCom(prc)) ? NORMAL_PERFORM : POP_ERROR_GOT;
     case POPM_COM:
         return (PopmCom(prc)) ? NORMAL_PERFORM : POP_ERROR_GOT;
     case ADD_COM:
-        return (Add(&prc->proc_stck)) ? NORMAL_PERFORM : ADD_ERROR_GOT;
+        return (Add(prc)) ? NORMAL_PERFORM : ADD_ERROR_GOT;
     case SUB_COM:
-        return (Subtract(&prc->proc_stck)) ? NORMAL_PERFORM : SUB_ERROR_GOT;
+        return (Subtract(prc)) ? NORMAL_PERFORM : SUB_ERROR_GOT;
     case MULT_COM:
-        return (Multiply(&prc->proc_stck)) ? NORMAL_PERFORM : MULT_ERROR_GOT;
+        return (Multiply(prc)) ? NORMAL_PERFORM : MULT_ERROR_GOT;
     case DIV_COM:
-        return (Divide(&prc->proc_stck)) ? NORMAL_PERFORM : DIV_ERROR_GOT;
+        return (Divide(prc)) ? NORMAL_PERFORM : DIV_ERROR_GOT;
     case JMP_COM:
-        return (JmpCom(prc, prc->byte_code[prc->pc + 1])) ? NORMAL_PERFORM : JMP_ERROR_GOT;
+        return (JmpCom(prc)) ? NORMAL_PERFORM : JMP_ERROR_GOT;
     case JA_COM:
-        return (JaCom(prc, prc->byte_code[prc->pc + 1])) ? NORMAL_PERFORM : JMP_ERROR_GOT;
+        return (JaCom(prc)) ? NORMAL_PERFORM : JMP_ERROR_GOT;
     case JAE_COM:
-        return (JaeCom(prc, prc->byte_code[prc->pc + 1])) ? NORMAL_PERFORM : JMP_ERROR_GOT;
+        return (JaeCom(prc)) ? NORMAL_PERFORM : JMP_ERROR_GOT;
     case JB_COM:
-        return (JbCom(prc, prc->byte_code[prc->pc + 1])) ? NORMAL_PERFORM : JMP_ERROR_GOT;
+        return (JbCom(prc)) ? NORMAL_PERFORM : JMP_ERROR_GOT;
     case JBE_COM:
-        return (JbeCom(prc, prc->byte_code[prc->pc + 1])) ? NORMAL_PERFORM : JMP_ERROR_GOT;
+        return (JbeCom(prc)) ? NORMAL_PERFORM : JMP_ERROR_GOT;
     case JE_COM:
-        return (JeCom(prc, prc->byte_code[prc->pc + 1])) ? NORMAL_PERFORM : JMP_ERROR_GOT;
+        return (JeCom(prc)) ? NORMAL_PERFORM : JMP_ERROR_GOT;
     case JNE_COM:
-        return (JneCom(prc, prc->byte_code[prc->pc + 1])) ? NORMAL_PERFORM : JMP_ERROR_GOT; 
+        return (JneCom(prc)) ? NORMAL_PERFORM : JMP_ERROR_GOT; 
     case IN_COM:
-        return (InputRes(&prc->proc_stck)) ? NORMAL_PERFORM : JMP_ERROR_GOT;
+        return (InputRes(prc)) ? NORMAL_PERFORM : IN_ERROR_GOT;
     case CALL_COM:
-        return (CallCom(prc, prc->byte_code[prc->pc + 1])) ? NORMAL_PERFORM : JMP_ERROR_GOT;
+        return (CallCom(prc)) ? NORMAL_PERFORM : CALL_ERROR_GOT;
     case RET_COM:
-        return (RetCom(prc)) ? NORMAL_PERFORM : JMP_ERROR_GOT;
+        return (RetCom(prc)) ? NORMAL_PERFORM : CALL_ERROR_GOT;
     case WRONG_COMMAND_COM:
         return HLT_ERROR_GOT;
     };
@@ -323,10 +327,9 @@ int RunOperation(procsr_t *prc) {
 // !SECTION
 // SECTION - JUMP functions
 
-int JmpCom(procsr_t *prc, int jmp_label) {
-    assert(prc);
+int JmpCom(procsr_t *prc) {
 
-    prc->pc = jmp_label;
+    prc->pc = prc->byte_code[prc->pc + 1];
     ON_PRC_IFS(
         if (0 > prc->byte_code[prc->pc] || prc->byte_code[prc->pc] >= WRONG_COMMAND_COM) {
             fprintf(stderr, "WRONG LABEL: %d\n", prc->byte_code[prc->pc]);
@@ -336,10 +339,12 @@ int JmpCom(procsr_t *prc, int jmp_label) {
     return OPERATION_OK;
 }
 
-int JaCom(procsr_t *prc, int jmp_label) {
+int JaCom(procsr_t *prc) {
+    assert(prc);
+
     int el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
     if (el1 < el2) {
-        prc->pc = jmp_label;
+        prc->pc = prc->byte_code[prc->pc + 1];
         ON_PRC_IFS(
             if (0 > prc->byte_code[prc->pc] || prc->byte_code[prc->pc] >= WRONG_COMMAND_COM) {
                 fprintf(stderr, "WRONG LABEL: %d\n", prc->byte_code[prc->pc]);
@@ -353,10 +358,12 @@ int JaCom(procsr_t *prc, int jmp_label) {
     return OPERATION_OK;
 }
 
-int JaeCom(procsr_t *prc, int jmp_label) {
+int JaeCom(procsr_t *prc) {
+    assert(prc);
+
     int el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
     if (el1 <= el2) {
-        prc->pc = jmp_label;
+        prc->pc = prc->byte_code[prc->pc + 1];
         ON_PRC_IFS(
             if (0 > prc->byte_code[prc->pc] || prc->byte_code[prc->pc] >= WRONG_COMMAND_COM) {
                 fprintf(stderr, "WRONG LABEL: %d\n", prc->byte_code[prc->pc]);
@@ -370,10 +377,12 @@ int JaeCom(procsr_t *prc, int jmp_label) {
     return OPERATION_OK;
 }
 
-int JbCom(procsr_t *prc, int jmp_label) {
+int JbCom(procsr_t *prc) {
+    assert(prc);
+
     int el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
     if (el1 > el2) {
-        prc->pc = jmp_label;
+        prc->pc = prc->byte_code[prc->pc + 1];
         ON_PRC_IFS(
             if (0 > prc->byte_code[prc->pc] || prc->byte_code[prc->pc] >= WRONG_COMMAND_COM) {
                 fprintf(stderr, "WRONG LABEL: %d\n", prc->byte_code[prc->pc]);
@@ -387,10 +396,12 @@ int JbCom(procsr_t *prc, int jmp_label) {
     return OPERATION_OK;
 }
 
-int JbeCom(procsr_t *prc, int jmp_label) {
+int JbeCom(procsr_t *prc) {
+    assert(prc);
+
     int el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
     if (el1 >= el2) {
-        prc->pc = jmp_label;
+        prc->pc = prc->byte_code[prc->pc + 1];
         ON_PRC_IFS(
             if (0 > prc->byte_code[prc->pc] || prc->byte_code[prc->pc] >= WRONG_COMMAND_COM) {
                 fprintf(stderr, "WRONG LABEL: %d\n", prc->byte_code[prc->pc]);
@@ -404,10 +415,12 @@ int JbeCom(procsr_t *prc, int jmp_label) {
     return OPERATION_OK;
 }
 
-int JeCom(procsr_t *prc, int jmp_label) {
+int JeCom(procsr_t *prc) {
+    assert(prc);
+
     int el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
     if (el1 == el2) {
-        prc->pc = jmp_label;
+        prc->pc = prc->byte_code[prc->pc + 1];
         ON_PRC_IFS(
             if (0 > prc->byte_code[prc->pc] || prc->byte_code[prc->pc] >= WRONG_COMMAND_COM) {
                 fprintf(stderr, "WRONG LABEL: %d\n", prc->byte_code[prc->pc]);
@@ -421,10 +434,12 @@ int JeCom(procsr_t *prc, int jmp_label) {
     return OPERATION_OK;
 }
 
-int JneCom(procsr_t *prc, int jmp_label) {
+int JneCom(procsr_t *prc) {
+    assert(prc);
+
     int el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
     if (el1 != el2) {
-        prc->pc = jmp_label;
+        prc->pc = prc->byte_code[prc->pc + 1];
         ON_PRC_IFS(
             if (0 > prc->byte_code[prc->pc] || prc->byte_code[prc->pc] >= WRONG_COMMAND_COM) {
                 fprintf(stderr, "WRONG LABEL: %d\n", prc->byte_code[prc->pc]);
@@ -441,12 +456,40 @@ int JneCom(procsr_t *prc, int jmp_label) {
 // !SECTION
 // SECTION - PUSH and POP functions
 
-int PushCom(stack_t *st, elem_t el) {
-    assert(st);
+int PushCom(procsr_t *prc) {
+    assert(prc);
 
     ON_PRC_IFS(
-        if (StackPush(st, el) != EGENERALLY_STACK_OK || 
-            st->cur_err != EGENERALLY_STACK_OK) {
+        if (StackPush(&prc->proc_stck, prc->byte_code[prc->pc + 1]) != 
+            EGENERALLY_STACK_OK || prc->proc_stck.cur_err != EGENERALLY_STACK_OK) {
+            PRINT_PUSH_COM_FAIL(__func__);
+            return OPERATION_FAIL;
+        }
+    )
+
+    return OPERATION_OK;
+}
+
+int PushrCom(procsr_t *prc) {
+    assert(prc);
+
+    ON_PRC_IFS(
+        if (StackPush(&prc->proc_stck, prc->rgstr[prc->byte_code[prc->pc + 1]]) != 
+            EGENERALLY_STACK_OK || prc->proc_stck.cur_err != EGENERALLY_STACK_OK) {
+            PRINT_PUSH_COM_FAIL(__func__);
+            return OPERATION_FAIL;
+        }
+    )
+
+    return OPERATION_OK;
+}
+
+int PushmCom(procsr_t *prc) {
+    assert(prc);
+
+    ON_PRC_IFS(
+        if (StackPush(&prc->proc_stck, prc->ram[prc->byte_code[prc->pc + 1]]) != 
+            EGENERALLY_STACK_OK || prc->proc_stck.cur_err != EGENERALLY_STACK_OK) {
             PRINT_PUSH_COM_FAIL(__func__);
             return OPERATION_FAIL;
         }
@@ -474,13 +517,13 @@ int PopmCom(procsr_t *prc) {
 // !SECTION
 // SECTION - Mathimatical functions
 
-int Multiply(stack_t *st) {
-    assert(st);
+int Multiply(procsr_t *prc) {
+    assert(prc);
     
-    elem_t el1 = StackPop(st), el2 = StackPop(st);
+    elem_t el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
     ON_PRC_IFS(
-        if (StackPush(st, el1 * el2) != EGENERALLY_STACK_OK || 
-            st->cur_err != EGENERALLY_STACK_OK) {
+        if (StackPush(&prc->proc_stck, el1 * el2) != EGENERALLY_STACK_OK || 
+            prc->proc_stck.cur_err != EGENERALLY_STACK_OK) {
             PRINT_PUSH_COM_FAIL(__func__);
             return OPERATION_FAIL;
         }
@@ -488,18 +531,18 @@ int Multiply(stack_t *st) {
     return OPERATION_OK;
 }
 
-int Divide(stack_t *st) {
-    assert(st);
+int Divide(procsr_t *prc) {
+    assert(prc);
     
-    elem_t el1 = StackPop(st), el2 = StackPop(st);
+    elem_t el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
     if (el1 == 0) {
         fprintf(stderr, "ERROR: division by zero. %d / %d\n", el2, el1);
-        StackPush(st, INT_MAX);
+        StackPush(&prc->proc_stck, INT_MAX);
         return OPERATION_FAIL;
     }
     ON_PRC_IFS(
-        if (StackPush(st, el2 / el1) != EGENERALLY_STACK_OK || 
-            st->cur_err != EGENERALLY_STACK_OK) {
+        if (StackPush(&prc->proc_stck, el2 / el1) != EGENERALLY_STACK_OK || 
+            prc->proc_stck.cur_err != EGENERALLY_STACK_OK) {
             PRINT_PUSH_COM_FAIL(__func__);
             return OPERATION_FAIL;
         }
@@ -507,13 +550,13 @@ int Divide(stack_t *st) {
     return OPERATION_OK;
 }
 
-int Add(stack_t *st) {
-    assert(st);
+int Add(procsr_t *prc) {
+    assert(prc);
     
-    elem_t el1 = StackPop(st), el2 = StackPop(st);
+    elem_t el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
     ON_PRC_IFS(
-        if (StackPush(st, el1 + el2) != EGENERALLY_STACK_OK || 
-            st->cur_err != EGENERALLY_STACK_OK) {
+        if (StackPush(&prc->proc_stck, el1 + el2) != EGENERALLY_STACK_OK || 
+            prc->proc_stck.cur_err != EGENERALLY_STACK_OK) {
             PRINT_PUSH_COM_FAIL(__func__);
             return OPERATION_FAIL;
         }
@@ -521,13 +564,13 @@ int Add(stack_t *st) {
     return OPERATION_OK;
 }
 
-int Subtract(stack_t *st) {
-    assert(st);
+int Subtract(procsr_t *prc) {
+    assert(prc);
     
-    elem_t el1 = StackPop(st), el2 = StackPop(st);
+    elem_t el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
     ON_PRC_IFS(
-        if (StackPush(st, el2 - el1) != EGENERALLY_STACK_OK || 
-            st->cur_err != EGENERALLY_STACK_OK) {
+        if (StackPush(&prc->proc_stck, el2 - el1) != EGENERALLY_STACK_OK || 
+            prc->proc_stck.cur_err != EGENERALLY_STACK_OK) {
             PRINT_PUSH_COM_FAIL(__func__);
             return OPERATION_FAIL;
         }
@@ -538,13 +581,13 @@ int Subtract(stack_t *st) {
 // !SECTION
 // SECTION - System functions
 
-int OutputRes(stack_t *st) {
-    assert(st);
+int OutputRes(procsr_t *prc) {
+    assert(prc);
     
     // printf("pop called from out\n");
-    elem_t res_el = StackPop(st);
+    elem_t res_el = StackPop(&prc->proc_stck);
     ON_PRC_IFS(
-        if (st->cur_err != EGENERALLY_STACK_OK) {
+        if (prc->proc_stck.cur_err != EGENERALLY_STACK_OK) {
             fprintf(stderr, "Unsafe pop try in %s function while getting output\n", __func__);
             ON_NSF_TR(return OPERATION_FAIL;) 
         }
@@ -553,14 +596,14 @@ int OutputRes(stack_t *st) {
     return OPERATION_OK;
 }
 
-int InputRes(stack_t *st) {
-    assert(st);
+int InputRes(procsr_t *prc) {
+    assert(prc);
 
     elem_t res_el = 0;
     if (scanf("%d", &res_el)) {
         // ON_PRC_IFS(
-        if (StackPush(st, res_el) != EGENERALLY_STACK_OK || 
-            st->cur_err != EGENERALLY_STACK_OK) {
+        if (StackPush(&prc->proc_stck, res_el) != EGENERALLY_STACK_OK || 
+            prc->proc_stck.cur_err != EGENERALLY_STACK_OK) {
             PRINT_PUSH_COM_FAIL(__func__);
             return OPERATION_FAIL;
         }
@@ -570,7 +613,7 @@ int InputRes(stack_t *st) {
     return OPERATION_FAIL;
 }
 
-int CallCom(procsr_t *prc, int call_label) {
+int CallCom(procsr_t *prc) {
     assert(prc);
 
     // printf("adr of ret <- %d\n", prc->pc + 2);
@@ -579,7 +622,7 @@ int CallCom(procsr_t *prc, int call_label) {
         PRINT_PUSH_COM_FAIL(__func__);
         return OPERATION_FAIL;
     }
-    prc->pc = call_label;
+    prc->pc = prc->byte_code[prc->pc + 1];
     ON_PRC_IFS(
         if (0 > prc->byte_code[prc->pc] || prc->byte_code[prc->pc] >= WRONG_COMMAND_COM) {
             fprintf(stderr, "WRONG CALL LABEL: %d\n", prc->byte_code[prc->pc]);
@@ -595,16 +638,15 @@ int CallCom(procsr_t *prc, int call_label) {
 int RetCom(procsr_t *prc) {
     assert(prc);
 
-    int ret_label = StackPop(&prc->funcs_stck);
     // printf("ret -> %d\n", ret_label);
-    prc->pc = ret_label;
+    prc->pc = StackPop(&prc->funcs_stck);
     return OPERATION_OK;
 }
 
-int SoftHalt(stack_t *st) {
-    assert(st);
+int SoftHalt(procsr_t *prc) {
+    assert(prc);
     
-    if (StackDestroy(st ON_DBG(, __func__, __LINE__)) == EGENERALLY_STACK_OK) {
+    if (StackDestroy(&prc->proc_stck ON_DBG(, __func__, __LINE__)) == EGENERALLY_STACK_OK) {
         return OPERATION_OK;
     }
     fprintf(stderr, "PROCESS MAY HAS GOT THE FATAL ERROR AND FINISHED UNNORMALLY\n");
