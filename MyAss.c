@@ -75,7 +75,7 @@ bool CheckComHasArgs(int read_com);
 int SecondRun(code_t *co, size_t lines_amount);
 int ScanLabel(char *buf_ptr, int *lab, size_t ind_line);
 bool ScanCom(char *buf_ptr, char *com, size_t ind_line);
-bool LineIsEmpty(char *buf_ptr);
+bool LineIsEmptyComs(char *buf_ptr);
 bool CheckComLine(command_t com, char *buf_ptr, size_t line_ind, int *check_arg);
 bool CheckPushCom(char *buf_ptr, size_t line_ind, int *check_arg);
 bool CheckPushRegCom(char *buf_ptr, size_t line_ind, int *check_arg);
@@ -170,10 +170,12 @@ int RunAss(code_t *my_code, int fd, FILE *w_fp) {
 
     int errs_got = GetCode(my_code, fd);
     if ((errs_got & ~CODE_IS_OK) != 0) {
+        close(fd), fclose(w_fp);
         AnalyzeGotCode(errs_got);
         return 1;
     }
     BytedFWrite(w_fp, my_code);
+    close(fd), fclose(w_fp);
     return 0;
 }
 
@@ -252,34 +254,20 @@ int BytedFWrite(FILE *fp, code_t *co) {
     assert(co);
 
     for (size_t ind = 0; ind < co->b_c_size; ) {
-        if (IsNotJmpCom(co->byted_code[ind]) && co->byted_code[ind] != CALL_COM) {
-            if (co->byted_code[ind] == RET_COM) {
-                fprintf(fp, "%d\n\n", co->byted_code[ind]);
-                ind++;
-                continue;
-            }
-            int offset = GetCodeOffset(co->byted_code[ind]);
-            switch (offset) {
-            case ONE_ARG_OFFSET:
-                fprintf(fp, "%d %d\n", co->byted_code[ind], co->byted_code[ind + 1]);
-                break;
-            case NO_ARG_OFFSET:
-                fprintf(fp, "%d\n", co->byted_code[ind]);
-                break;
-            case HLT_COM_OFFSET:
-                fprintf(fp, "%d\n\n", co->byted_code[ind++]);
-                continue;
-            default:
-                fprintf(stderr, "UNKNOWN OFFSET GOT\n");
-                return 0;
-            };
-
-            ind += offset;
-        }
-        else {
+        int offset = GetCodeOffset(co->byted_code[ind]);
+        switch (offset) {
+        case ONE_ARG_OFFSET:
             fprintf(fp, "%d %d\n", co->byted_code[ind], co->byted_code[ind + 1]);
-            ind += 2;
-        }
+            break;
+        case NO_ARG_OFFSET:
+            fprintf(fp, "%d\n", co->byted_code[ind]);
+            break;
+        default:
+            fprintf(stderr, "UNKNOWN OFFSET GOT\n");
+            return 0;
+        };
+
+        ind += offset;
     }
     return 1;
 }
@@ -369,8 +357,10 @@ buf_read_err_t ReadBuf(code_t *co, size_t d_c_lines_amount) {
     bool hlt_found = false;
 
     for (size_t ind_line = 0; ind_line < d_c_lines_amount; ind_line++) {
-        while (isspace(*buf_ptr) && *buf_ptr != '\0') {
-            buf_ptr++;
+        SpacesSkip(&buf_ptr);
+        if (*buf_ptr == ';') {
+            buf_ptr += strlen(buf_ptr) + 1;
+            continue;
         }
         if (*buf_ptr == '\0') {
             buf_ptr++;
@@ -441,10 +431,14 @@ bool CheckComHasArgs(int read_com) {
 int SecondRun(code_t *co, size_t lines_amount) {
     assert(co);
 
-    int offset = 0, pc = 0;
+    int pc = 0;
     char *buf_ptr = co->default_code;
     for (size_t line_ind = 0; line_ind < lines_amount; line_ind++) {
         SpacesSkip(&buf_ptr);
+        if (*buf_ptr == ';') {
+            buf_ptr += strlen(buf_ptr) + 1;
+            continue;
+        }
         if (*buf_ptr == '\0') {
             buf_ptr++;
             continue;
@@ -469,25 +463,14 @@ int SecondRun(code_t *co, size_t lines_amount) {
             co->cur_err |= BAD_LABEL_PLACEMENT;
             return co->cur_err;
         }
+        
         if (!IsNotJmpCom(co->byted_code[pc]) || co->byted_code[pc] == CALL_COM) {
             co->byted_code[++pc] = co->labels[arg];
             pc++;
             buf_ptr += strlen(buf_ptr) + 1;
             continue;
         }
-        if (co->byted_code[pc] == RET_COM) {
-            pc++;
-            buf_ptr += strlen(buf_ptr) + 1;
-            continue;
-        }
-        offset = GetCodeOffset(co->byted_code[pc]);
-        
-        if (offset == HLT_COM_OFFSET) {
-            pc++;
-            buf_ptr += strlen(buf_ptr) + 1;
-            continue;
-        }
-        pc += offset;
+        pc += GetCodeOffset(co->byted_code[pc]);;
         buf_ptr += strlen(buf_ptr) + 1;
     }
     // co->cur_err |= BAD_LABEL_PLACEMENT;
@@ -509,7 +492,7 @@ int ScanLabel(char *buf_ptr, int *lab, size_t ind_line) {
             return GOT_BAD_LABEL;
         }
         GraphemeSkip(&buf_ptr);
-        if (LineIsEmpty(buf_ptr)) {
+        if (LineIsEmptyComs(buf_ptr)) {
             return GOT_GOOD_LABEL;
         }
         fprintf(stderr, "SYNTAX ERROR: BAD LABEL on the line %llu\n", ind_line + 1);
@@ -529,11 +512,11 @@ bool ScanCom(char *buf_ptr, char *com, size_t ind_line) {
     return true;
 }
 
-bool LineIsEmpty(char *buf_ptr) {
+bool LineIsEmptyComs(char *buf_ptr) {
     assert(buf_ptr);
 
     SpacesSkip(&buf_ptr);
-    if (*buf_ptr == '\0') {
+    if (*buf_ptr == '\0' || *buf_ptr == ';') {
         buf_ptr++;
         return true;
     }
@@ -547,14 +530,14 @@ bool CheckComLine(command_t com, char *buf_ptr, size_t line_ind, int *check_arg)
     switch (com) {
     case OUT_COM:
         buf_ptr += sizeof("OUT") - 1;
-        if (LineIsEmpty(buf_ptr)) {
+        if (LineIsEmptyComs(buf_ptr)) {
             return true;
         }
         PRINT_SYNTAX_ERROR("OUT", line_ind);
         return false;
     case HLT_COM:
         buf_ptr += sizeof("HLT") - 1;
-        if (LineIsEmpty(buf_ptr)) {
+        if (LineIsEmptyComs(buf_ptr)) {
             return true;
         }
         PRINT_SYNTAX_ERROR("HLT", line_ind);
@@ -571,28 +554,28 @@ bool CheckComLine(command_t com, char *buf_ptr, size_t line_ind, int *check_arg)
         return CheckPopMemCom(buf_ptr, line_ind, check_arg);
     case ADD_COM:
         buf_ptr += sizeof("ADD") - 1;
-        if (LineIsEmpty(buf_ptr)) {
+        if (LineIsEmptyComs(buf_ptr)) {
             return true;
         }
         PRINT_SYNTAX_ERROR("ADD", line_ind);
         return false;
     case SUB_COM:
         buf_ptr += sizeof("SUB") - 1;
-        if (LineIsEmpty(buf_ptr)) {
+        if (LineIsEmptyComs(buf_ptr)) {
             return true;
         }
         PRINT_SYNTAX_ERROR("SUB", line_ind);
         return false;
     case MULT_COM:
         buf_ptr += sizeof("MULT") - 1;
-        if (LineIsEmpty(buf_ptr)) {
+        if (LineIsEmptyComs(buf_ptr)) {
             return true;
         }
         PRINT_SYNTAX_ERROR("MULT", line_ind);
         return false;
     case DIV_COM:
         buf_ptr += sizeof("DIV") - 1;
-        if (LineIsEmpty(buf_ptr)) {
+        if (LineIsEmptyComs(buf_ptr)) {
             return true;
         }
         PRINT_SYNTAX_ERROR("DIV", line_ind);
@@ -622,7 +605,7 @@ bool CheckComLine(command_t com, char *buf_ptr, size_t line_ind, int *check_arg)
         buf_ptr += sizeof("IN") - 1;
         // printf(buf_ptr);
         // printf("|\n");
-        if (LineIsEmpty(buf_ptr)) {
+        if (LineIsEmptyComs(buf_ptr)) {
             return true;
         }
         PRINT_SYNTAX_ERROR("IN", line_ind);
@@ -632,7 +615,7 @@ bool CheckComLine(command_t com, char *buf_ptr, size_t line_ind, int *check_arg)
         return ChecKJmpCom(buf_ptr, line_ind, "CALL", check_arg);
     case RET_COM:
         buf_ptr += sizeof("RET") - 1;
-        if (LineIsEmpty(buf_ptr)) {
+        if (LineIsEmptyComs(buf_ptr)) {
             return true;
         }
         PRINT_SYNTAX_ERROR("RET", line_ind);
@@ -656,7 +639,7 @@ bool CheckPushCom(char *buf_ptr, size_t line_ind, int *check_arg) {
     }
     SpacesSkip(&buf_ptr);
     GraphemeSkip(&buf_ptr);
-    if (LineIsEmpty(buf_ptr)) {
+    if (LineIsEmptyComs(buf_ptr)) {
         return true;
     }
     PRINT_TOO_MANY_ARGS("PUSH", line_ind);
@@ -679,7 +662,7 @@ bool CheckPushRegCom(char *buf_ptr, size_t line_ind, int *check_arg) {
     *check_arg -= REGS_DEPTH;
     SpacesSkip(&buf_ptr);
     GraphemeSkip(&buf_ptr);
-    if (LineIsEmpty(buf_ptr)) {
+    if (LineIsEmptyComs(buf_ptr)) {
         return true;
     }
     PRINT_TOO_MANY_ARGS("PUSH", line_ind);
@@ -716,7 +699,7 @@ bool CheckPushMemCom(char *buf_ptr, size_t line_ind, int *check_arg) {
     }
     SpacesSkip(&buf_ptr);
     GraphemeSkip(&buf_ptr);
-    if (LineIsEmpty(buf_ptr)) {
+    if (LineIsEmptyComs(buf_ptr)) {
         return true;
     }
     PRINT_TOO_MANY_ARGS("PUSH", line_ind);
@@ -737,7 +720,7 @@ bool CheckPopRegCom(char *buf_ptr, size_t line_ind, int *check_arg) {
     *check_arg -= REGS_DEPTH;
     SpacesSkip(&buf_ptr);
     GraphemeSkip(&buf_ptr);
-    if (LineIsEmpty(buf_ptr)) {
+    if (LineIsEmptyComs(buf_ptr)) {
         return true;
     }
     PRINT_TOO_MANY_ARGS("POP", line_ind);
@@ -771,7 +754,7 @@ bool CheckPopMemCom(char *buf_ptr, size_t line_ind, int *check_arg) {
     }
     SpacesSkip(&buf_ptr);
     GraphemeSkip(&buf_ptr);
-    if (LineIsEmpty(buf_ptr)) {
+    if (LineIsEmptyComs(buf_ptr)) {
         return true;
     }
     PRINT_TOO_MANY_ARGS("POP", line_ind);
@@ -794,7 +777,7 @@ bool ChecKJmpCom(char *buf_ptr, size_t line_ind, const char *jmp_name, int *chec
     }
     SpacesSkip(&buf_ptr);
     GraphemeSkip(&buf_ptr);
-    if (LineIsEmpty(buf_ptr)) {
+    if (LineIsEmptyComs(buf_ptr)) {
         return true;
     }
     PRINT_TOO_MANY_ARGS(jmp_name, line_ind);

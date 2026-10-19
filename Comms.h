@@ -41,12 +41,12 @@ typedef enum {
     WRONG_COMMAND_COM,
 } command_t;
 
-#define HLT_COM_OFFSET 255
+// #define HLT_COM_OFFSET 255
 #define ONE_ARG_OFFSET 2
 #define NO_ARG_OFFSET 1
-#define JMP_OFFSET 0
-#define CALL_OFFSET 0
-#define RET_OFFSET 0
+// #define JMP_OFFSET 0
+// #define CALL_OFFSET 0
+// #define RET_OFFSET 0
 #define CODE_LINE_MULTIPLIER 5
 #define REGS_DEPTH 4
 
@@ -87,7 +87,7 @@ int GetCodeOffset(int com) {
     case OUT_COM:
         return NO_ARG_OFFSET;
     case HLT_COM:
-        return HLT_COM_OFFSET;
+        return NO_ARG_OFFSET;
     case PUSH_COM:
         return ONE_ARG_OFFSET;
     case PUSHR_COM:
@@ -107,25 +107,25 @@ int GetCodeOffset(int com) {
     case DIV_COM:
         return NO_ARG_OFFSET;
     case JMP_COM:
-        return JMP_OFFSET;
+        return ONE_ARG_OFFSET;
     case JA_COM:
-        return JMP_OFFSET;
+        return ONE_ARG_OFFSET;
     case JAE_COM:
-        return JMP_OFFSET;
+        return ONE_ARG_OFFSET;
     case JB_COM:
-        return JMP_OFFSET;
+        return ONE_ARG_OFFSET;
     case JBE_COM:
-        return JMP_OFFSET;
+        return ONE_ARG_OFFSET;
     case JE_COM:
-        return JMP_OFFSET;
+        return ONE_ARG_OFFSET;
     case JNE_COM:
-        return JMP_OFFSET;
+        return ONE_ARG_OFFSET;
     case IN_COM:
         return NO_ARG_OFFSET;
     case CALL_COM:
-        return CALL_OFFSET;
+        return ONE_ARG_OFFSET;
     case RET_COM:
-        return RET_OFFSET;
+        return NO_ARG_OFFSET;
     case WRONG_COMMAND_COM:
         return NO_ARG_OFFSET;
     }

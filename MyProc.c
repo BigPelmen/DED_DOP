@@ -48,6 +48,8 @@ typedef struct {
     int pc;
     int *rgstr;
     int *ram;
+    int prc_err;
+    bool is_active;
     stack_t proc_stck;
     stack_t funcs_stck;
 } procsr_t;
@@ -110,7 +112,7 @@ int main() {
     }
     res_buf_ptr[transferred - 1] = '\0';
     size_t real_len = 0;
-    int *by_co = ReadBytedBuf(res_buf_ptr, 100, &real_len);
+    int *by_co = ReadBytedBuf(res_buf_ptr, 200, &real_len);
     if (by_co == NULL) {
         return 1;
     }
@@ -233,6 +235,8 @@ void ProcInit(procsr_t *prc, int *b_code ON_DBG(, int ln, FILE *file_log)) {
     prc->ram = ramy;
     prc->rgstr = rgstry;
     prc->byte_code = b_code;
+    prc->prc_err = NORMAL_PERFORM;
+    prc->is_active = false;
     return ;
 }
 
@@ -258,18 +262,14 @@ void ProcDestroy(procsr_t *prc ON_DBG(, const char *f_name, int ln)) {
 int RunCode(procsr_t *prc) {
     assert(prc);
 
-    int offset = 0;
-    int err = 0;
-    while (true) {
-        if ((offset = GetCodeOffset(prc->byte_code[prc->pc])) == HLT_COM_OFFSET) {
-            if ((err & ~NORMAL_PERFORM) != 0) {
-                fprintf(stderr, "PROCESS ENDED WITH EXIT CODE: %#x", err);
-            }
-            return 0;
-        }
-        err |= RunOperation(prc);
-        prc->pc += offset;
+    prc->is_active = true;
+    while (prc->is_active) {
+        prc->prc_err |= RunOperation(prc);
     }
+    if ((prc->prc_err & ~NORMAL_PERFORM) != 0) {
+        fprintf(stderr, "PROCESS ENDED WITH EXIT CODE: %#x", prc->prc_err);
+    }
+    return 0;
 }
 
 int RunOperation(procsr_t *prc) {
@@ -353,7 +353,7 @@ int JaCom(procsr_t *prc) {
         )
     }
     else {
-        prc->pc += 2;
+        prc->pc += ONE_ARG_OFFSET;
     }
     return OPERATION_OK;
 }
@@ -372,7 +372,7 @@ int JaeCom(procsr_t *prc) {
         )
     }
     else {
-        prc->pc += 2;
+        prc->pc += ONE_ARG_OFFSET;
     }
     return OPERATION_OK;
 }
@@ -391,7 +391,7 @@ int JbCom(procsr_t *prc) {
         )
     }
     else {
-        prc->pc += 2;
+        prc->pc += ONE_ARG_OFFSET;
     }
     return OPERATION_OK;
 }
@@ -410,7 +410,7 @@ int JbeCom(procsr_t *prc) {
         )
     }
     else {
-        prc->pc += 2;
+        prc->pc += ONE_ARG_OFFSET;
     }
     return OPERATION_OK;
 }
@@ -429,7 +429,7 @@ int JeCom(procsr_t *prc) {
         )
     }
     else {
-        prc->pc += 2;
+        prc->pc += ONE_ARG_OFFSET;
     }
     return OPERATION_OK;
 }
@@ -448,7 +448,7 @@ int JneCom(procsr_t *prc) {
         )
     }
     else {
-        prc->pc += 2;
+        prc->pc += ONE_ARG_OFFSET;
     }
     return OPERATION_OK;
 }
@@ -463,10 +463,11 @@ int PushCom(procsr_t *prc) {
         if (StackPush(&prc->proc_stck, prc->byte_code[prc->pc + 1]) != 
             EGENERALLY_STACK_OK || prc->proc_stck.cur_err != EGENERALLY_STACK_OK) {
             PRINT_PUSH_COM_FAIL(__func__);
+            prc->pc += ONE_ARG_OFFSET;
             return OPERATION_FAIL;
         }
     )
-
+    prc->pc += ONE_ARG_OFFSET;
     return OPERATION_OK;
 }
 
@@ -477,10 +478,11 @@ int PushrCom(procsr_t *prc) {
         if (StackPush(&prc->proc_stck, prc->rgstr[prc->byte_code[prc->pc + 1]]) != 
             EGENERALLY_STACK_OK || prc->proc_stck.cur_err != EGENERALLY_STACK_OK) {
             PRINT_PUSH_COM_FAIL(__func__);
+            prc->pc += ONE_ARG_OFFSET;
             return OPERATION_FAIL;
         }
     )
-
+    prc->pc += ONE_ARG_OFFSET;
     return OPERATION_OK;
 }
 
@@ -491,26 +493,27 @@ int PushmCom(procsr_t *prc) {
         if (StackPush(&prc->proc_stck, prc->ram[prc->byte_code[prc->pc + 1]]) != 
             EGENERALLY_STACK_OK || prc->proc_stck.cur_err != EGENERALLY_STACK_OK) {
             PRINT_PUSH_COM_FAIL(__func__);
+            prc->pc += ONE_ARG_OFFSET;
             return OPERATION_FAIL;
         }
     )
-
+    prc->pc += ONE_ARG_OFFSET;
     return OPERATION_OK;
 }
 
 int PoprCom(procsr_t *prc) {
     assert(prc);
 
-    int el = StackPop(&prc->proc_stck);
-    prc->rgstr[prc->byte_code[prc->pc + 1]] = el;
+    prc->rgstr[prc->byte_code[prc->pc + 1]] = StackPop(&prc->proc_stck);
+    prc->pc += ONE_ARG_OFFSET;
     return OPERATION_OK;
 }
 
 int PopmCom(procsr_t *prc) {
     assert(prc);
 
-    int el = StackPop(&prc->proc_stck);
-    prc->ram[prc->byte_code[prc->pc + 1]] = el;
+    prc->ram[prc->byte_code[prc->pc + 1]] = StackPop(&prc->proc_stck);
+    prc->pc += ONE_ARG_OFFSET;
     return OPERATION_OK;
 }
 
@@ -521,6 +524,7 @@ int Multiply(procsr_t *prc) {
     assert(prc);
     
     elem_t el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
+    prc->pc += NO_ARG_OFFSET;
     ON_PRC_IFS(
         if (StackPush(&prc->proc_stck, el1 * el2) != EGENERALLY_STACK_OK || 
             prc->proc_stck.cur_err != EGENERALLY_STACK_OK) {
@@ -528,6 +532,7 @@ int Multiply(procsr_t *prc) {
             return OPERATION_FAIL;
         }
     )
+    
     return OPERATION_OK;
 }
 
@@ -535,6 +540,7 @@ int Divide(procsr_t *prc) {
     assert(prc);
     
     elem_t el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
+    prc->pc += NO_ARG_OFFSET;
     if (el1 == 0) {
         fprintf(stderr, "ERROR: division by zero. %d / %d\n", el2, el1);
         StackPush(&prc->proc_stck, INT_MAX);
@@ -547,6 +553,7 @@ int Divide(procsr_t *prc) {
             return OPERATION_FAIL;
         }
     )
+    
     return OPERATION_OK;
 }
 
@@ -554,6 +561,7 @@ int Add(procsr_t *prc) {
     assert(prc);
     
     elem_t el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
+    prc->pc += NO_ARG_OFFSET;
     ON_PRC_IFS(
         if (StackPush(&prc->proc_stck, el1 + el2) != EGENERALLY_STACK_OK || 
             prc->proc_stck.cur_err != EGENERALLY_STACK_OK) {
@@ -561,6 +569,7 @@ int Add(procsr_t *prc) {
             return OPERATION_FAIL;
         }
     )
+    
     return OPERATION_OK;
 }
 
@@ -568,6 +577,7 @@ int Subtract(procsr_t *prc) {
     assert(prc);
     
     elem_t el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
+    prc->pc += NO_ARG_OFFSET;
     ON_PRC_IFS(
         if (StackPush(&prc->proc_stck, el2 - el1) != EGENERALLY_STACK_OK || 
             prc->proc_stck.cur_err != EGENERALLY_STACK_OK) {
@@ -575,6 +585,7 @@ int Subtract(procsr_t *prc) {
             return OPERATION_FAIL;
         }
     )
+    
     return OPERATION_OK;    
 }
 
@@ -593,6 +604,7 @@ int OutputRes(procsr_t *prc) {
         }
     )
     fprintf(stdout, "|OUT: %5d|\n", res_el);
+    prc->pc += NO_ARG_OFFSET;
     return OPERATION_OK;
 }
 
@@ -608,8 +620,10 @@ int InputRes(procsr_t *prc) {
             return OPERATION_FAIL;
         }
         // )
+        prc->pc += NO_ARG_OFFSET;
         return OPERATION_OK;  
     }
+    prc->pc += NO_ARG_OFFSET;
     return OPERATION_FAIL;
 }
 
@@ -646,11 +660,13 @@ int RetCom(procsr_t *prc) {
 int SoftHalt(procsr_t *prc) {
     assert(prc);
     
-    if (StackDestroy(&prc->proc_stck ON_DBG(, __func__, __LINE__)) == EGENERALLY_STACK_OK) {
-        return OPERATION_OK;
+    prc->is_active = false;
+    prc->pc += NO_ARG_OFFSET;
+    if (prc->prc_err != NORMAL_PERFORM) {
+        fprintf(stderr, "PROCESS MAY HAS GOT THE FATAL ERROR AND FINISHED UNNORMALLY\n");
+        return OPERATION_FAIL;
     }
-    fprintf(stderr, "PROCESS MAY HAS GOT THE FATAL ERROR AND FINISHED UNNORMALLY\n");
-    return OPERATION_FAIL;
+    return OPERATION_OK;
 }
 
 // !SECTION

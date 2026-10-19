@@ -4,21 +4,19 @@ OUT
 HLT
 
 :0
-    POP AX
+    POP AX 
     PUSH AX
     PUSH 1
     PUSH AX
-    JAE :1
-    PUSH AX
+    JAE :1 ; if 1 >= ax goto :1
+    PUSH AX ; else ax -= 1
     PUSH 1
     SUB
-    PUSH AX
-    OUT
     CALL :0
-    MULT
+    MULT ; ax *= (ax + 1)
     RET
 
-:1
+:1 ; 1 >= ax
     POP AX
     PUSH 1
     RET
