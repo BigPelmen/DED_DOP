@@ -1,0 +1,24 @@
+IN
+CALL :0
+OUT
+HLT
+
+:0
+    POP AX
+    PUSH AX
+    PUSH 1
+    PUSH AX
+    JAE :1
+    PUSH AX
+    PUSH 1
+    SUB
+    PUSH AX
+    OUT
+    CALL :0
+    MULT
+    RET
+
+:1
+    POP AX
+    PUSH 1
+    RET

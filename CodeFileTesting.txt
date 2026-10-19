@@ -1,0 +1,24 @@
+PUSH 0
+POP AX
+    :1
+    PUSH AX
+    PUSH 10
+    JA :2
+        CALL :5
+        JMP :1
+:2
+HLT
+:5
+    CALL :6
+    OUT
+    PUSH AX
+    PUSH 2
+    ADD
+    POP AX
+    RET
+
+:6
+    PUSH AX
+    PUSH AX
+    MULT
+    RET

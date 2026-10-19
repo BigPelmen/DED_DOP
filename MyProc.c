@@ -2,11 +2,11 @@
 
 // TODO PUSH DOES NOT WORK CORRECTLY WITH [ABX] COMBINATION - IT WILL JUST TAKE THE NUMBER OF THE REGISTR
 
-// #define DEF_STACK_TYPE int
-// #define STACK_DEBUG
-// #define STACK_HASHES_ON
-// #define STACK_CANARIES_ON
-// #define STACK_STRICT_PTR
+#define DEF_STACK_TYPE int
+#define STACK_DEBUG
+#define STACK_HASHES_ON
+#define STACK_CANARIES_ON
+#define STACK_STRICT_PTR
 #include "stack.h"
 #include "Comms.h"
 
@@ -39,11 +39,7 @@ typedef enum {
 #define RAM_COEF 2
 
 #define PRINT_PUSH_COM_FAIL(which_function) \
-    fprintf(stderr, "%s function FAILED while pushing\n", which_function) 
-
-// typedef struct {
-//     int ax, bx, cx, dx;
-// } regstrs_t;
+    fprintf(stderr, "%s function FAILED while pushing\n", which_function)
 
 typedef struct {
     int *byte_code;
@@ -51,8 +47,12 @@ typedef struct {
     int *rgstr;
     int *ram;
     stack_t proc_stck;
+    stack_t funcs_stck;
 } procsr_t;
 
+// SECTION - Functions prototypes
+
+bool FilesAreWrong(FILE **f_log, int *fd_read, size_t *f_read_size);
 int GetFDesc(const char *f_name, int flags, mode_t f_mode);
 size_t GetFileSize(int fd);
 int *ReadBytedBuf(char *buf, size_t lines_amount, size_t *real_len);
@@ -74,22 +74,22 @@ int Divide(stack_t *st);
 int Add(stack_t *st);
 int Subtract(stack_t *st);
 int OutputRes(stack_t *st);
+int InputRes(stack_t *st);
+int CallCom(procsr_t *prc, int call_label);
+int RetCom(procsr_t *prc);
 int SoftHalt(stack_t *st);
 void ProcDestroy(procsr_t *prc ON_DBG(, const char *f_name, int ln));
 void IntStackPrint(FILE *f_log, const void *element);
 
+// !SECTION
+// SECTION - main
+
 int main() {
     procsr_t proc = {};
-    FILE *file_log = LogOpen("LogFile.txt", "w");
-    if (file_log == NULL) {
-        return 1;
-    }
-    int fd_read = GetFDesc("ByteCode.txt", O_RDONLY, S_IRUSR);
-    if (fd_read < 0) {
-        return 1;
-    }
-    size_t f_read_size = GetFileSize(fd_read);
-    if (f_read_size == 0) {
+    FILE *file_log = NULL;
+    int fd_read = -1;
+    size_t f_read_size = 0;
+    if (FilesAreWrong(&file_log, &fd_read, &f_read_size)) {
         return 1;
     }
     char *f_buf = (char *)calloc(f_read_size + 1, sizeof(char));
@@ -113,7 +113,34 @@ int main() {
     ProcInit(&proc, by_co ON_DBG(, __LINE__, file_log));
     RunCode(&proc);
     ProcDestroy(&proc ON_DBG(, __FILE__, __LINE__));
+    close(fd_read), fclose(file_log);
     return 0;
+}
+
+// !SECTION
+// SECTION - Reader functions
+
+bool FilesAreWrong(FILE **f_log, int *fd_read, size_t *f_read_size) {
+    assert(f_log);
+    assert(fd_read);
+    assert(f_read_size);
+
+    *f_log = LogOpen("LogFile.txt", "w");
+    if (*f_log == NULL) {
+        fprintf(stderr, "Log file is not correct\n");
+        return true;
+    }
+    *fd_read = GetFDesc("ByteCode.txt", O_RDONLY, S_IRUSR);
+    if (*fd_read < 0) {
+        fprintf(stderr, "Byte code file descriptor is wrong\n");
+        return true;
+    }
+    *f_read_size = GetFileSize(*fd_read);
+    if (*f_read_size == 0) {
+        fprintf(stderr, "Did not manage to get byte code file size\n");
+        return true;
+    }
+    return false;
 }
 
 int *ReadBytedBuf(char *buf, size_t lines_amount, size_t *real_len) {
@@ -170,13 +197,18 @@ int *ReadBytedBuf(char *buf, size_t lines_amount, size_t *real_len) {
     return b_c_res;
 }
 
+// !SECTION
+// SECTION - Processor procedure functions
+
 void ProcInit(procsr_t *prc, int *b_code ON_DBG(, int ln, FILE *file_log)) {
     assert(prc);
     ON_DBG(assert(file_log);)
     assert(b_code);
 
-    StackInit(&prc->proc_stck, 10 
-        ON_DBG(, __FILE__, GET_NAME(prc), ln, file_log, &IntStackPrint));
+    StackInit(&prc->proc_stck, 64 
+        ON_DBG(, __FILE__, GET_NAME(proc_stck), ln, file_log, &IntStackPrint));
+    StackInit(&prc->funcs_stck, 64 
+        ON_DBG(, __FILE__, GET_NAME(funcs_stck), ln, file_log, &IntStackPrint));
     prc->pc = 0;
     int *rgstry = (int *)calloc(REGS_AMOUNT, sizeof(int));
     if (rgstry == NULL) {
@@ -207,6 +239,9 @@ void ProcDestroy(procsr_t *prc ON_DBG(, const char *f_name, int ln)) {
     if (StackDestroy(&prc->proc_stck ON_DBG(, f_name, ln)) != EGENERALLY_STACK_OK) {
         fprintf(stderr, "PROCESS ENDED WITH UNNORMAL STACK\n");
     }
+    if (StackDestroy(&prc->funcs_stck ON_DBG(, f_name, ln)) != EGENERALLY_STACK_OK) {
+        fprintf(stderr, "PROCESS ENDED WITH UNNORMAL FUNCTIONS STACK\n");
+    }
     free(prc->byte_code);
     prc->byte_code = NULL;
     free(prc->rgstr);
@@ -222,8 +257,7 @@ int RunCode(procsr_t *prc) {
     int offset = 0;
     int err = 0;
     while (true) {
-        offset = GetCodeOffset(prc->byte_code[prc->pc]);
-        if (offset == HLT_COM_OFFSET) {
+        if ((offset = GetCodeOffset(prc->byte_code[prc->pc])) == HLT_COM_OFFSET) {
             if ((err & ~NORMAL_PERFORM) != 0) {
                 fprintf(stderr, "PROCESS ENDED WITH EXIT CODE: %#x", err);
             }
@@ -273,12 +307,21 @@ int RunOperation(procsr_t *prc) {
     case JE_COM:
         return (JeCom(prc, prc->byte_code[prc->pc + 1])) ? NORMAL_PERFORM : JMP_ERROR_GOT;
     case JNE_COM:
-        return (JneCom(prc, prc->byte_code[prc->pc + 1])) ? NORMAL_PERFORM : JMP_ERROR_GOT;    
+        return (JneCom(prc, prc->byte_code[prc->pc + 1])) ? NORMAL_PERFORM : JMP_ERROR_GOT; 
+    case IN_COM:
+        return (InputRes(&prc->proc_stck)) ? NORMAL_PERFORM : JMP_ERROR_GOT;
+    case CALL_COM:
+        return (CallCom(prc, prc->byte_code[prc->pc + 1])) ? NORMAL_PERFORM : JMP_ERROR_GOT;
+    case RET_COM:
+        return (RetCom(prc)) ? NORMAL_PERFORM : JMP_ERROR_GOT;
     case WRONG_COMMAND_COM:
         return HLT_ERROR_GOT;
     };
     return HLT_ERROR_GOT;
 }
+
+// !SECTION
+// SECTION - JUMP functions
 
 int JmpCom(procsr_t *prc, int jmp_label) {
     assert(prc);
@@ -295,7 +338,7 @@ int JmpCom(procsr_t *prc, int jmp_label) {
 
 int JaCom(procsr_t *prc, int jmp_label) {
     int el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
-    if (el1 > el2) {
+    if (el1 < el2) {
         prc->pc = jmp_label;
         ON_PRC_IFS(
             if (0 > prc->byte_code[prc->pc] || prc->byte_code[prc->pc] >= WRONG_COMMAND_COM) {
@@ -312,7 +355,7 @@ int JaCom(procsr_t *prc, int jmp_label) {
 
 int JaeCom(procsr_t *prc, int jmp_label) {
     int el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
-    if (el1 >= el2) {
+    if (el1 <= el2) {
         prc->pc = jmp_label;
         ON_PRC_IFS(
             if (0 > prc->byte_code[prc->pc] || prc->byte_code[prc->pc] >= WRONG_COMMAND_COM) {
@@ -329,7 +372,7 @@ int JaeCom(procsr_t *prc, int jmp_label) {
 
 int JbCom(procsr_t *prc, int jmp_label) {
     int el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
-    if (el1 < el2) {
+    if (el1 > el2) {
         prc->pc = jmp_label;
         ON_PRC_IFS(
             if (0 > prc->byte_code[prc->pc] || prc->byte_code[prc->pc] >= WRONG_COMMAND_COM) {
@@ -346,7 +389,7 @@ int JbCom(procsr_t *prc, int jmp_label) {
 
 int JbeCom(procsr_t *prc, int jmp_label) {
     int el1 = StackPop(&prc->proc_stck), el2 = StackPop(&prc->proc_stck);
-    if (el1 <= el2) {
+    if (el1 >= el2) {
         prc->pc = jmp_label;
         ON_PRC_IFS(
             if (0 > prc->byte_code[prc->pc] || prc->byte_code[prc->pc] >= WRONG_COMMAND_COM) {
@@ -395,6 +438,9 @@ int JneCom(procsr_t *prc, int jmp_label) {
     return OPERATION_OK;
 }
 
+// !SECTION
+// SECTION - PUSH and POP functions
+
 int PushCom(stack_t *st, elem_t el) {
     assert(st);
 
@@ -424,6 +470,9 @@ int PopmCom(procsr_t *prc) {
     prc->ram[prc->byte_code[prc->pc + 1]] = el;
     return OPERATION_OK;
 }
+
+// !SECTION
+// SECTION - Mathimatical functions
 
 int Multiply(stack_t *st) {
     assert(st);
@@ -486,9 +535,13 @@ int Subtract(stack_t *st) {
     return OPERATION_OK;    
 }
 
+// !SECTION
+// SECTION - System functions
+
 int OutputRes(stack_t *st) {
     assert(st);
     
+    // printf("pop called from out\n");
     elem_t res_el = StackPop(st);
     ON_PRC_IFS(
         if (st->cur_err != EGENERALLY_STACK_OK) {
@@ -497,6 +550,54 @@ int OutputRes(stack_t *st) {
         }
     )
     fprintf(stdout, "|OUT: %5d|\n", res_el);
+    return OPERATION_OK;
+}
+
+int InputRes(stack_t *st) {
+    assert(st);
+
+    elem_t res_el = 0;
+    if (scanf("%d", &res_el)) {
+        // ON_PRC_IFS(
+        if (StackPush(st, res_el) != EGENERALLY_STACK_OK || 
+            st->cur_err != EGENERALLY_STACK_OK) {
+            PRINT_PUSH_COM_FAIL(__func__);
+            return OPERATION_FAIL;
+        }
+        // )
+        return OPERATION_OK;  
+    }
+    return OPERATION_FAIL;
+}
+
+int CallCom(procsr_t *prc, int call_label) {
+    assert(prc);
+
+    // printf("adr of ret <- %d\n", prc->pc + 2);
+    if (StackPush(&prc->funcs_stck, prc->pc + 2) != EGENERALLY_STACK_OK || 
+        prc->funcs_stck.cur_err != EGENERALLY_STACK_OK) {
+        PRINT_PUSH_COM_FAIL(__func__);
+        return OPERATION_FAIL;
+    }
+    prc->pc = call_label;
+    ON_PRC_IFS(
+        if (0 > prc->byte_code[prc->pc] || prc->byte_code[prc->pc] >= WRONG_COMMAND_COM) {
+            fprintf(stderr, "WRONG CALL LABEL: %d\n", prc->byte_code[prc->pc]);
+            return OPERATION_FAIL;
+        }
+    )
+    
+    // LogStackDump(prc->funcs_stck.file_log, &prc->funcs_stck, &IntStackPrint);
+    // LogStackDump(prc->funcs_stck.file_log, &prc->proc_stck, &IntStackPrint);
+    return OPERATION_OK;
+}
+
+int RetCom(procsr_t *prc) {
+    assert(prc);
+
+    int ret_label = StackPop(&prc->funcs_stck);
+    // printf("ret -> %d\n", ret_label);
+    prc->pc = ret_label;
     return OPERATION_OK;
 }
 
@@ -509,6 +610,8 @@ int SoftHalt(stack_t *st) {
     fprintf(stderr, "PROCESS MAY HAS GOT THE FATAL ERROR AND FINISHED UNNORMALLY\n");
     return OPERATION_FAIL;
 }
+
+// !SECTION
 
 void IntStackPrint(FILE *f_log, const void *element) {
     assert(f_log);

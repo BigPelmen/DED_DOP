@@ -35,8 +35,9 @@ typedef enum {
     JBE_COM,
     JE_COM,
     JNE_COM,
-    // CALL_COM,
-    // RET_COM,
+    CALL_COM,
+    RET_COM,
+    IN_COM,
     WRONG_COMMAND_COM,
 } command_t;
 
@@ -44,6 +45,8 @@ typedef enum {
 #define ONE_ARG_OFFSET 2
 #define NO_ARG_OFFSET 1
 #define JMP_OFFSET 0
+#define CALL_OFFSET 0
+#define RET_OFFSET 0
 #define CODE_LINE_MULTIPLIER 5
 #define REGS_DEPTH 4
 
@@ -117,6 +120,12 @@ int GetCodeOffset(int com) {
         return JMP_OFFSET;
     case JNE_COM:
         return JMP_OFFSET;
+    case IN_COM:
+        return NO_ARG_OFFSET;
+    case CALL_COM:
+        return CALL_OFFSET;
+    case RET_COM:
+        return RET_OFFSET;
     case WRONG_COMMAND_COM:
         return NO_ARG_OFFSET;
     }

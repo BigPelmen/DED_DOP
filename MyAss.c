@@ -60,6 +60,8 @@ typedef struct {
     int cur_err;
 } code_t;
 
+// SECTION - Functions prototypes
+
 int GetFDesc(const char *f_name, int flags, mode_t f_mode);
 size_t GetFileSize(int fd);
 int RunAss(code_t *my_code, int fd, FILE *w_fp);
@@ -81,18 +83,21 @@ bool CheckPopRegCom(char *buf_ptr, size_t line_ind, int *check_arg);
 bool CheckPopMemCom(char *buf_ptr, size_t line_ind, int *check_arg);
 bool CheckPushMemCom(char *buf_ptr, size_t line_ind, int *check_arg);
 bool ChecKJmpCom(char *buf_ptr, size_t line_ind, const char *jmp_name, int *check_arg);
-command_t ReadCommand(const char com[], char *buf, size_t line_ind);
+command_t ReadCommand(const char *com, char *buf, size_t line_ind);
 FILE *GetFPtr(const char *f_name, const char *f_mode);
 int BytedFWrite(FILE *fp, code_t *co);
 bool IsNotJmpCom(int read_com_num);
 void AnalyzeGotCode(int err);
+
+// !SECTION
+// SECTION - main
 
 int main(int argc, char const *argv[]) {
     code_t my_code = {};
     int fd = 0;
     FILE *w_fp = NULL;
     switch (argc) {
-    case 1:
+    case NO_WHERE:
         if ((fd = GetFDesc("CodeFile.txt", O_RDONLY, S_IRUSR)) < 0) {
             return 1;
         }
@@ -100,7 +105,7 @@ int main(int argc, char const *argv[]) {
             return 1;
         }
         break;
-    case 2:
+    case WHERE_READ:
         if ((fd = GetFDesc(argv[1], O_RDONLY, S_IRUSR)) < 0) {
             return 1;
         }
@@ -108,7 +113,7 @@ int main(int argc, char const *argv[]) {
             return 1;
         }
         break;
-    case 3:
+    case WHERE_READ_WRITE:
         if ((fd = GetFDesc(argv[1], O_RDONLY, S_IRUSR)) < 0) {
             return 1;
         }
@@ -142,43 +147,8 @@ int main(int argc, char const *argv[]) {
     // BytedFWrite(w_fp, &my_code);
 }
 
-int RunAss(code_t *my_code, int fd, FILE *w_fp) {
-    assert(my_code);
-    assert(w_fp);
-
-    int errs_got = GetCode(my_code, fd);
-    if ((errs_got & ~CODE_IS_OK) != 0) {
-        AnalyzeGotCode(errs_got);
-        return 1;
-    }
-    BytedFWrite(w_fp, my_code);
-    return 0;
-}
-
-void AnalyzeGotCode(int err) {
-    if ((err & BAD_FILE_DESCRIPTOR) != 0) {
-        fprintf(stderr, "DID NOT MANAGE TO GET READ FILE DESCRIPTOR\n");
-    }
-    if ((err & BAD_R_FILE_SIZE) != 0) {
-        fprintf(stderr, "FAILED GETTING FILE SIZE\n");
-    }
-    if ((err & BAD_CALLOC_PTR) != 0) {
-        fprintf(stderr, "FAILED CALLOC ATTEMPT HAS BEEN DONE\n");
-    }
-    if ((err & BAD_REALLOC_PTR) != 0) {
-        fprintf(stderr, "FAILED REALLOC ATTEMPT HAS BEEN DONE\n");
-    }
-    if ((err & BAD_READ_TRY) != 0) {
-        fprintf(stderr, "READ FUNCTION FAILED WHILE READING FILE DESCRIPTOR\n");
-    }
-    if ((err & BAD_BUF_PARSE) != 0) {
-        fprintf(stderr, "SYNTAX ERROR OR BAD RESULT WHILE PARSING BUFFER\n");
-    }
-    if ((err & BAD_LABEL_PLACEMENT) != 0) {
-        fprintf(stderr, "SYNTAX ERROR OR SEMANCY OF LABELS\n");
-    }
-    return ;
-}
+// !SECTION
+// SECTION - Functions
 
 FILE *GetFPtr(const char *f_name, const char *f_mode) {
     assert(f_name);
@@ -194,48 +164,17 @@ FILE *GetFPtr(const char *f_name, const char *f_mode) {
     return fp;
 }
 
-int BytedFWrite(FILE *fp, code_t *co) {
-    assert(fp);
-    assert(co);
+int RunAss(code_t *my_code, int fd, FILE *w_fp) {
+    assert(my_code);
+    assert(w_fp);
 
-    int *reserve_b_c = co->byted_code;
-    for (size_t ind = 0; ind < co->b_c_size; ) {
-        if (IsNotJmpCom(co->byted_code[ind])) {
-            int offset = GetCodeOffset(co->byted_code[ind]);
-            switch (offset) {
-            case ONE_ARG_OFFSET:
-                for (int j = 0; j < offset; j++) {
-                    fprintf(fp, "%d%s", reserve_b_c[j], (j != offset - 1) ? " " : "\n");
-                }
-                break;
-            case NO_ARG_OFFSET:
-                fprintf(fp, "%d\n", *reserve_b_c);
-                break;
-            case HLT_COM_OFFSET:
-                fprintf(fp, "%d ", *reserve_b_c++);
-                ind++;
-                break;
-            default:
-                fprintf(stderr, "UNKNOWN OFFSET GOT\n");
-                return 0;
-            };
-            
-            ind += offset;
-            reserve_b_c += offset;
-        }
-        else {
-            fprintf(fp, "%d %d\n", *reserve_b_c, *(reserve_b_c + 1));
-            ind += 2, reserve_b_c += 2;
-        }
+    int errs_got = GetCode(my_code, fd);
+    if ((errs_got & ~CODE_IS_OK) != 0) {
+        AnalyzeGotCode(errs_got);
+        return 1;
     }
-    return 1;
-}
-
-bool IsNotJmpCom(int read_com_num) {
-    return (bool)(read_com_num != JMP_COM && 
-        read_com_num != JA_COM && read_com_num != JAE_COM && 
-        read_com_num != JB_COM && read_com_num != JBE_COM && 
-        read_com_num != JE_COM && read_com_num != JNE_COM);
+    BytedFWrite(w_fp, my_code);
+    return 0;
 }
 
 int GetCode(code_t *my_code, int fd) {
@@ -281,6 +220,75 @@ int GetCode(code_t *my_code, int fd) {
         fprintf(stderr, "BAD SECOND RUN FOR LABELS\n");
     }
     return my_code->cur_err;
+}
+
+void AnalyzeGotCode(int err) {
+    if ((err & BAD_FILE_DESCRIPTOR) != 0) {
+        fprintf(stderr, "DID NOT MANAGE TO GET READ FILE DESCRIPTOR\n");
+    }
+    if ((err & BAD_R_FILE_SIZE) != 0) {
+        fprintf(stderr, "FAILED GETTING FILE SIZE\n");
+    }
+    if ((err & BAD_CALLOC_PTR) != 0) {
+        fprintf(stderr, "FAILED CALLOC ATTEMPT HAS BEEN DONE\n");
+    }
+    if ((err & BAD_REALLOC_PTR) != 0) {
+        fprintf(stderr, "FAILED REALLOC ATTEMPT HAS BEEN DONE\n");
+    }
+    if ((err & BAD_READ_TRY) != 0) {
+        fprintf(stderr, "READ FUNCTION FAILED WHILE READING FILE DESCRIPTOR\n");
+    }
+    if ((err & BAD_BUF_PARSE) != 0) {
+        fprintf(stderr, "SYNTAX ERROR OR BAD RESULT WHILE PARSING BUFFER\n");
+    }
+    if ((err & BAD_LABEL_PLACEMENT) != 0) {
+        fprintf(stderr, "SYNTAX ERROR OR SEMANCY OF LABELS\n");
+    }
+    return ;
+}
+
+int BytedFWrite(FILE *fp, code_t *co) {
+    assert(fp);
+    assert(co);
+
+    for (size_t ind = 0; ind < co->b_c_size; ) {
+        if (IsNotJmpCom(co->byted_code[ind]) && co->byted_code[ind] != CALL_COM) {
+            if (co->byted_code[ind] == RET_COM) {
+                fprintf(fp, "%d\n\n", co->byted_code[ind]);
+                ind++;
+                continue;
+            }
+            int offset = GetCodeOffset(co->byted_code[ind]);
+            switch (offset) {
+            case ONE_ARG_OFFSET:
+                fprintf(fp, "%d %d\n", co->byted_code[ind], co->byted_code[ind + 1]);
+                break;
+            case NO_ARG_OFFSET:
+                fprintf(fp, "%d\n", co->byted_code[ind]);
+                break;
+            case HLT_COM_OFFSET:
+                fprintf(fp, "%d\n\n", co->byted_code[ind++]);
+                continue;
+            default:
+                fprintf(stderr, "UNKNOWN OFFSET GOT\n");
+                return 0;
+            };
+
+            ind += offset;
+        }
+        else {
+            fprintf(fp, "%d %d\n", co->byted_code[ind], co->byted_code[ind + 1]);
+            ind += 2;
+        }
+    }
+    return 1;
+}
+
+bool IsNotJmpCom(int read_com_num) {
+    return (bool)(read_com_num != JMP_COM && 
+        read_com_num != JA_COM && read_com_num != JAE_COM && 
+        read_com_num != JB_COM && read_com_num != JBE_COM && 
+        read_com_num != JE_COM && read_com_num != JNE_COM);
 }
 
 bool CheckFileErr(code_t *my_code, int fd) {
@@ -358,6 +366,7 @@ buf_read_err_t ReadBuf(code_t *co, size_t d_c_lines_amount) {
         return BAD_BUF_CALLOC;
     }
     size_t by_code_len = 0;
+    bool hlt_found = false;
 
     for (size_t ind_line = 0; ind_line < d_c_lines_amount; ind_line++) {
         while (isspace(*buf_ptr) && *buf_ptr != '\0') {
@@ -400,14 +409,20 @@ buf_read_err_t ReadBuf(code_t *co, size_t d_c_lines_amount) {
             reserve_by_code[by_code_len++] = arg;
         }
         if (read_com == HLT_COM) {
-            int *res_byted = (int *)realloc(reserve_by_code, by_code_len * sizeof(*reserve_by_code));
-            if (res_byted == NULL) {
-                return BAD_BUF_REALLOC;
-            }
-            co->b_c_size = by_code_len, co->byted_code = res_byted;
-            return GOT_CODE_SUCCESSFULLY; 
+            hlt_found = true;
         }
         buf_ptr += strlen(buf_ptr) + 1;
+    }
+    if (hlt_found) {
+        int *res_byted = (int *)realloc(reserve_by_code, by_code_len * sizeof(*reserve_by_code));
+        if (res_byted == NULL) {
+            return BAD_BUF_REALLOC;
+        }
+        co->b_c_size = by_code_len, co->byted_code = res_byted;
+        // for (size_t i = 0; i < co->b_c_size; i++) {
+        //     printf("|%2d|\n", co->byted_code[i]);
+        // }
+        return GOT_CODE_SUCCESSFULLY;
     }
     fprintf(stderr, "IMPLIED: HLT HAS NOT BEEN FOUND\n");
     return READ_F_REACHED_END;
@@ -416,6 +431,7 @@ buf_read_err_t ReadBuf(code_t *co, size_t d_c_lines_amount) {
 bool CheckComHasArgs(int read_com) {
     return (bool)(read_com == PUSH_COM || read_com == PUSHR_COM || read_com == PUSHM_COM || 
         read_com == POPR_COM || read_com == POPM_COM || 
+        read_com == CALL_COM || 
         read_com == JMP_COM || 
         read_com == JA_COM || read_com == JAE_COM || 
         read_com == JB_COM || read_com == JBE_COM || 
@@ -433,7 +449,6 @@ int SecondRun(code_t *co, size_t lines_amount) {
             buf_ptr++;
             continue;
         }
-        
         int lab = 0, lab_scan_info = ScanLabel(buf_ptr, &lab, line_ind);
         if ((size_t)lab >= co->b_c_size) {
             fprintf(stderr, "BAD LABEL GOT (TOO FAR JUMP)\n");
@@ -444,17 +459,23 @@ int SecondRun(code_t *co, size_t lines_amount) {
             buf_ptr += strlen(buf_ptr) + 1;
             continue;
         }
-        
+
         int arg = 0;
         // printf("buf: <%s>\n", buf_ptr);
         if (!CheckComLine((command_t)co->byted_code[pc], buf_ptr, line_ind, &arg)) {
+            printf(buf_ptr);
             printf("Failed in: <%s>\n", buf_ptr);
             fprintf(stderr, "UNMATCHED COMMAND HAS BEEN FOUND\n");
             co->cur_err |= BAD_LABEL_PLACEMENT;
             return co->cur_err;
         }
-        if (!IsNotJmpCom(co->byted_code[pc])) {
+        if (!IsNotJmpCom(co->byted_code[pc]) || co->byted_code[pc] == CALL_COM) {
             co->byted_code[++pc] = co->labels[arg];
+            pc++;
+            buf_ptr += strlen(buf_ptr) + 1;
+            continue;
+        }
+        if (co->byted_code[pc] == RET_COM) {
             pc++;
             buf_ptr += strlen(buf_ptr) + 1;
             continue;
@@ -462,7 +483,9 @@ int SecondRun(code_t *co, size_t lines_amount) {
         offset = GetCodeOffset(co->byted_code[pc]);
         
         if (offset == HLT_COM_OFFSET) {
-            return CODE_IS_OK;
+            pc++;
+            buf_ptr += strlen(buf_ptr) + 1;
+            continue;
         }
         pc += offset;
         buf_ptr += strlen(buf_ptr) + 1;
@@ -577,7 +600,6 @@ bool CheckComLine(command_t com, char *buf_ptr, size_t line_ind, int *check_arg)
     case JMP_COM:
         buf_ptr += sizeof("JMP") - 1;
         return ChecKJmpCom(buf_ptr, line_ind, "JMP", check_arg);
-        return false;
     case JA_COM:
         buf_ptr += sizeof("JA") - 1;
         return ChecKJmpCom(buf_ptr, line_ind, "JA", check_arg);
@@ -596,6 +618,25 @@ bool CheckComLine(command_t com, char *buf_ptr, size_t line_ind, int *check_arg)
     case JNE_COM:
         buf_ptr += sizeof("JNE") - 1;
         return ChecKJmpCom(buf_ptr, line_ind, "JNE", check_arg);
+    case IN_COM:
+        buf_ptr += sizeof("IN") - 1;
+        // printf(buf_ptr);
+        // printf("|\n");
+        if (LineIsEmpty(buf_ptr)) {
+            return true;
+        }
+        PRINT_SYNTAX_ERROR("IN", line_ind);
+        return false;
+    case CALL_COM:
+        buf_ptr += sizeof("CALL") - 1;
+        return ChecKJmpCom(buf_ptr, line_ind, "CALL", check_arg);
+    case RET_COM:
+        buf_ptr += sizeof("RET") - 1;
+        if (LineIsEmpty(buf_ptr)) {
+            return true;
+        }
+        PRINT_SYNTAX_ERROR("RET", line_ind);
+        return false;
     case WRONG_COMMAND_COM:
         return false;
     };
@@ -746,7 +787,7 @@ bool ChecKJmpCom(char *buf_ptr, size_t line_ind, const char *jmp_name, int *chec
     if (*buf_ptr == ':') {
         buf_ptr++;
     }
-    printf("%s\n", (buf_ptr));
+    // printf("%s\n", (buf_ptr));
     if (sscanf(buf_ptr, "%d", check_arg) == 0) {
         PRINT_BAD_ARGS(jmp_name, line_ind);
         return false;
@@ -824,7 +865,18 @@ command_t ReadCommand(const char *com, char *buf, size_t line_ind) {
     if (strcmp("JNE", com) == 0) {
         return JNE_COM;
     }
+    if (strcmp("IN", com) == 0) {
+        return IN_COM;
+    }
+    if (strcmp("CALL", com) == 0) {
+        return CALL_COM;
+    }
+    if (strcmp("RET", com) == 0) {
+        return RET_COM;
+    }
     fprintf(stderr, "Syntax Error: <%s> on the line %llu does not match the list of the commands\n", 
         com, line_ind + 1);
     return WRONG_COMMAND_COM;
 }
+
+// !SECTION
