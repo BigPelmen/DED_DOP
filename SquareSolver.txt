@@ -1,0 +1,147 @@
+; TODO MAKE LINEAR
+
+CALL :0
+CALL :1
+CALL :2
+HLT
+
+:0 ; input function
+    IN
+    POP AX
+    IN
+    POP BX
+    IN
+    POP CX
+    RET
+
+:1 ; PUSH coeffs
+    PUSH CX
+    PUSH BX
+    PUSH AX
+    RET
+
+:2 ; checks if linear or not
+    PUSH 0
+    JE :3 ; go to linear
+    PUSH AX
+    CALL :4 ; call quadric
+    RET
+    :3 ; is linear
+        CALL :5
+        RET
+
+:4 ; quadric
+    CALL :6 ; count D
+    POP DX
+    PUSH DX
+    PUSH 0
+    JE :7 ; if D == 0
+    PUSH DX
+    PUSH 0
+    JB :8 ; if D < 0
+    CALL :9 ; get the sqrt out of D: DX = sqrt(DX)
+    PUSH 0
+    PUSH BX
+    SUB
+    PUSH DX
+    SUB
+    PUSH 2
+    PUSH AX
+    MULT
+    DIV
+    OUT ; left root out
+    PUSH 0
+    PUSH BX
+    SUB
+    PUSH DX
+    ADD
+    PUSH 2
+    PUSH AX
+    MULT
+    DIV
+    OUT ; right root out
+    RET
+    :7 ; D == 0
+        PUSH 0
+        PUSH BX
+        SUB ; -b
+        PUSH 2
+        PUSH AX ; 2a
+        MULT
+        DIV ; -b / 2a
+        OUT
+        RET
+    :8 ; D < 0
+        PUSH 0
+        OUT
+        RET
+
+:5 ; linear case function
+    PUSH BX
+    PUSH 0
+    JNE :12 ; if b == 0
+        PUSH CX
+        PUSH 0
+        JE :13 ; if c == 0
+        PUSH -12345 ; c != 0 -> no solutions
+        OUT
+        RET
+        :13 ; c == 0
+            PUSH 12345 ; infinity solutions
+            OUT
+            RET
+    :12 ; b != 0
+        PUSH 0
+        PUSH CX
+        SUB
+        PUSH BX
+        DIV
+        OUT ; x = -c \ b
+        RET
+
+:6 ; Get D function
+    PUSH BX
+    PUSH BX
+    MULT ; bb
+    PUSH 4
+    PUSH AX
+    MULT
+    PUSH CX
+    MULT ; 4ac
+    SUB ; bb - 4ac
+    RET
+
+:9 ; get the root out of D function
+    PUSH AX ; reserve a
+    PUSH CX ; reserve c
+    PUSH DX
+    PUSH 2
+    DIV
+    POP AX ; x1 = 1
+    PUSH 1
+    POP CX ; counter = 1
+    :10
+        PUSH CX
+        PUSH 10
+        JA :11 ; if counter > 20
+        PUSH AX
+        PUSH AX
+        MULT
+        PUSH DX
+        ADD
+        PUSH AX
+        DIV
+        PUSH 2
+        DIV
+        POP AX
+        PUSH 1
+        PUSH CX
+        ADD
+        POP CX
+        JMP :10
+    :11
+    POP CX
+    PUSH AX
+    POP DX
+    POP AX
+    RET

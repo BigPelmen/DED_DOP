@@ -666,6 +666,9 @@ int SoftHalt(procsr_t *prc) {
         fprintf(stderr, "PROCESS MAY HAS GOT THE FATAL ERROR AND FINISHED UNNORMALLY\n");
         return OPERATION_FAIL;
     }
+
+    LogStackDump(prc->funcs_stck.file_log, &prc->funcs_stck, &IntStackPrint);
+    LogStackDump(prc->proc_stck.file_log, &prc->proc_stck, &IntStackPrint);
     return OPERATION_OK;
 }
 

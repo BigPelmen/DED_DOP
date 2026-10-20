@@ -1,5 +1,3 @@
-; TODO MAKE LINEAR
-
 CALL :0
 CALL :1
 CALL :2
@@ -39,7 +37,6 @@ HLT
     PUSH DX
     PUSH 0
     JB :8 ; if D < 0
-    PUSH DX ; reghegffhn нужен корень
     CALL :9 ; get the sqrt out of D: DX = sqrt(DX)
     PUSH 0
     PUSH BX
@@ -78,8 +75,27 @@ HLT
         RET
 
 :5 ; linear case function
-
-    RET
+    PUSH BX
+    PUSH 0
+    JNE :12 ; if b == 0
+        PUSH CX
+        PUSH 0
+        JE :13 ; if c == 0
+        PUSH -12345 ; c != 0 -> no solutions
+        OUT
+        RET
+        :13 ; c == 0
+            PUSH 12345 ; infinity solutions
+            OUT
+            RET
+    :12 ; b != 0
+        PUSH 0
+        PUSH CX
+        SUB
+        PUSH BX
+        DIV
+        OUT ; x = -c \ b
+        RET
 
 :6 ; Get D function
     PUSH BX

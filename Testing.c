@@ -22,6 +22,7 @@
 
 typedef int (*comparator_t)(const void *, const void *);
 
+int RootSq(int cntr, int apr);
 void IntrinsicQuickSort(void *arr, size_t el_size, 
     ssize_t left, ssize_t right, comparator_t Comparator);
 void MyQuickSort(void *arr, size_t arr_size, size_t el_size, comparator_t Comparator);
@@ -35,7 +36,8 @@ int main() {
 //         GetRAMTotalSize() / 1024 / 1024 / 1024.0, GetRAMFreeSize() / 1024 / 1024 / 1024.0);
 
     stack_t st = {};
-    StackInit(&st, 1 ON_DBG(, __FILE__, GET_NAME(st), __LINE__, file_log, &DblStackPrint));
+    printf("%d\n", RootSq(28, 1209438));
+    // StackInit(&st, 1 ON_DBG(, __FILE__, GET_NAME(st), __LINE__, file_log, &DblStackPrint));
     
     // int massive_int[] = {12, 21, 21, -23, 3, 4, 10, 1};
     // double massive_dbl[] = {3.21, -21.0, 12e-3, 0.0, 1.0, -1.0};
@@ -50,6 +52,18 @@ int main() {
     // }
     // putchar('\n');
     return 0;
+}
+
+int RootSq(int cntr, int apr) {
+    // if (cntr <= 0) {
+    //     return 1;
+    // }
+    // return ((RootSq(cntr - 1, apr) + apr / RootSq(cntr - 1, apr)) / 2);
+    int x = 1;
+    for ( ; cntr >= 0; cntr--) {
+        x = (x + apr / x) / 2;
+    }
+    return x;
 }
 
 int CmpInt(const void* value_a, const void* value_b) {
