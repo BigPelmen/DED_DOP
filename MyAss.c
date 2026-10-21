@@ -60,17 +60,24 @@ typedef struct {
     int cur_err;
 } code_t;
 
+const char DFLT_READ_FILE_NAME[] = "CodeFile.txt";
+const char DFLT_WR_FILE_NAME[] = "ByteCode.txt";
+const char DFLT_WR_BIN_F_NAME[] = "ByteCode.bin";
+#define EXTRA_NAME_CHARS 10
+
 // SECTION - Functions prototypes
 
 int GetFDesc(const char *f_name, int flags, mode_t f_mode);
 size_t GetFileSize(int fd);
-int RunAss(code_t *my_code, int fd, FILE *w_fp);
+const char *GetFBinName(const char *bin_f_name, size_t bin_f_n_size);
+int RunAss(code_t *my_code, int fd, FILE *w_fp, int bin_fd);
 int GetCode(code_t *my_code, int fd);
 bool CheckFileErr(code_t *my_code, int fd);
 bool CheckResDCodeBuf(code_t *my_code, char *res_buf);
 bool GetLabelsPtr(code_t *my_code);
 size_t PlaceLineEnds(char buf[], size_t transferred);
 buf_read_err_t ReadBuf(code_t *co, size_t d_c_lines_amount);
+bool GotComOrOSym(char **buf_ptr);
 bool CheckComHasArgs(int read_com);
 int SecondRun(code_t *co, size_t lines_amount);
 int ScanLabel(char *buf_ptr, int *lab, size_t ind_line);
@@ -93,31 +100,29 @@ void AnalyzeGotCode(int err);
 // SECTION - main
 
 int main(int argc, char const *argv[]) {
+    
+    // FIXME - ERRNO IS PLACED TO INVALID ARGUMENT AFTER THIS SWITCH
     code_t my_code = {};
-    int fd = 0;
+    int fd = -1, bin_fd = -1;
     FILE *w_fp = NULL;
     switch (argc) {
     case NO_WHERE:
-        if ((fd = GetFDesc("CodeFile.txt", O_RDONLY, S_IRUSR)) < 0) {
+        if ((fd = GetFDesc(DFLT_READ_FILE_NAME, O_RDONLY, S_IRUSR)) < 0 || (w_fp = GetFPtr(DFLT_WR_FILE_NAME, "w")) == NULL || 
+            (bin_fd = open(GetFBinName(DFLT_READ_FILE_NAME, sizeof(DFLT_READ_FILE_NAME)), O_CREAT | O_RDWR | O_TRUNC, S_IRWXU)) < 0) {
             return 1;
         }
-        if ((w_fp = GetFPtr("ByteCode.txt", "w")) == NULL) {
-            return 1;
-        }
+        
+
         break;
     case WHERE_READ:
-        if ((fd = GetFDesc(argv[1], O_RDONLY, S_IRUSR)) < 0) {
-            return 1;
-        }
-        if ((w_fp = GetFPtr("ByteCode.txt", "w")) == NULL) {
+        if ((fd = GetFDesc(argv[1], O_RDONLY, S_IRUSR)) < 0 || (w_fp = GetFPtr(DFLT_WR_FILE_NAME, "w")) == NULL || 
+            (bin_fd = open(GetFBinName(argv[1], strlen(argv[1]) + 1), O_CREAT | O_RDWR | O_TRUNC, S_IRWXU)) < 0) {
             return 1;
         }
         break;
     case WHERE_READ_WRITE:
-        if ((fd = GetFDesc(argv[1], O_RDONLY, S_IRUSR)) < 0) {
-            return 1;
-        }
-        if ((w_fp = GetFPtr(argv[2], "w")) == NULL) {
+        if ((fd = GetFDesc(argv[1], O_RDONLY, S_IRUSR)) < 0 || (w_fp = GetFPtr(argv[2], "w")) == NULL || 
+            (bin_fd = open(GetFBinName(argv[2], strlen(argv[2]) + 1), O_CREAT | O_RDWR | O_TRUNC, S_IRWXU)) < 0) {
             return 1;
         }
         break;
@@ -125,30 +130,28 @@ int main(int argc, char const *argv[]) {
         fprintf(stderr, "WRONG PARAMETRS OF MAIN CALL\n");
         return 1;
     };
-    return RunAss(&my_code, fd, w_fp);
-    // int errs_got = GetCode(&my_code, fd);
-    // if ((errs_got & ~CODE_IS_OK) != 0) {
-    //     AnalyzeGotCode(errs_got);
-    //     return 1;
-    // }
-    // my_code.fp_dest = w_fp;
-    // printf("Finally: %d\n",(int)GetCode(&my_code, fd));
-    // printf("err = %d, %llu, %p, %llu, %p, \nfd = %d, fp = %p, %llu\n", 
-    //     my_code.cur_err, my_code.b_c_size, my_code.byted_code, my_code.d_c_size, my_code.default_code, 
-    //     my_code.fd_src, my_code.fp_dest, my_code.src_size);
-    // for (size_t i = 0; i < my_code.b_c_size; i++) {
-    //     printf("%d ", my_code.byted_code[i]);
-    // }
-    // printf("\n");
-    // for (size_t i = 0; i < LABEL_MAX; i++) {
-    //     printf("%d ", my_code.labels[i]);
-    // }
-    // printf("\n");
-    // BytedFWrite(w_fp, &my_code);
+    
+    return RunAss(&my_code, fd, w_fp, bin_fd);
 }
 
 // !SECTION
 // SECTION - Functions
+
+const char *GetFBinName(const char *bin_f_name, size_t bin_f_n_size) {
+    assert(bin_f_name);
+
+    char *res_name = (char *)calloc(bin_f_n_size + EXTRA_NAME_CHARS, sizeof(char));
+    if (res_name == NULL) {
+        return DFLT_WR_BIN_F_NAME;
+    }
+    char *name = res_name;
+    while ((*name = *bin_f_name) != '\0' && *name != '.') {
+        name++;
+        bin_f_name++;
+    }
+    *(++name) = 'b', *(++name) = 'i', *(++name) = 'n';
+    return (const char *)res_name;
+}
 
 FILE *GetFPtr(const char *f_name, const char *f_mode) {
     assert(f_name);
@@ -164,7 +167,7 @@ FILE *GetFPtr(const char *f_name, const char *f_mode) {
     return fp;
 }
 
-int RunAss(code_t *my_code, int fd, FILE *w_fp) {
+int RunAss(code_t *my_code, int fd, FILE *w_fp, int bin_fd) {
     assert(my_code);
     assert(w_fp);
 
@@ -175,7 +178,9 @@ int RunAss(code_t *my_code, int fd, FILE *w_fp) {
         return 1;
     }
     BytedFWrite(w_fp, my_code);
-    close(fd), fclose(w_fp);
+    printf("%d\n", write(bin_fd, my_code->byted_code, my_code->b_c_size * sizeof(int)));
+    
+    close(fd), fclose(w_fp), close(bin_fd);
     return 0;
 }
 
@@ -221,6 +226,7 @@ int GetCode(code_t *my_code, int fd) {
     if (SecondRun(my_code, my_code->lines_amount) != CODE_IS_OK) {
         fprintf(stderr, "BAD SECOND RUN FOR LABELS\n");
     }
+    
     return my_code->cur_err;
 }
 
@@ -246,6 +252,8 @@ void AnalyzeGotCode(int err) {
     if ((err & BAD_LABEL_PLACEMENT) != 0) {
         fprintf(stderr, "SYNTAX ERROR OR SEMANCY OF LABELS\n");
     }
+    
+
     return ;
 }
 
@@ -269,6 +277,7 @@ int BytedFWrite(FILE *fp, code_t *co) {
 
         ind += offset;
     }
+
     return 1;
 }
 
@@ -277,6 +286,7 @@ bool IsNotJmpCom(int read_com_num) {
         read_com_num != JA_COM && read_com_num != JAE_COM && 
         read_com_num != JB_COM && read_com_num != JBE_COM && 
         read_com_num != JE_COM && read_com_num != JNE_COM);
+    
 }
 
 bool CheckFileErr(code_t *my_code, int fd) {
@@ -296,6 +306,7 @@ bool CheckFileErr(code_t *my_code, int fd) {
         file_is_ok = false;
     }
     
+    
     return file_is_ok;
 }
 
@@ -308,6 +319,8 @@ bool CheckResDCodeBuf(code_t *my_code, char *res_buf) {
         my_code->cur_err |= BAD_REALLOC_PTR;
         return false;
     }
+    
+
     return true;
 }
 
@@ -320,6 +333,8 @@ bool GetLabelsPtr(code_t *my_code) {
         my_code->cur_err |= BAD_CALLOC_PTR;
         return false;
     }
+    
+
     my_code->labels = labels_ptr;
     return true;
 }
@@ -339,6 +354,8 @@ size_t PlaceLineEnds(char buf[], size_t transferred) {
         buf[tmp - buf] = '\0';
         last_found = tmp + 1;
     }
+    
+
     return i;
 }
 
@@ -358,12 +375,7 @@ buf_read_err_t ReadBuf(code_t *co, size_t d_c_lines_amount) {
 
     for (size_t ind_line = 0; ind_line < d_c_lines_amount; ind_line++) {
         SpacesSkip(&buf_ptr);
-        if (*buf_ptr == ';') {
-            buf_ptr += strlen(buf_ptr) + 1;
-            continue;
-        }
-        if (*buf_ptr == '\0') {
-            buf_ptr++;
+        if (GotComOrOSym(&buf_ptr)) {
             continue;
         }
 
@@ -412,10 +424,25 @@ buf_read_err_t ReadBuf(code_t *co, size_t d_c_lines_amount) {
         // for (size_t i = 0; i < co->b_c_size; i++) {
         //     printf("|%2d|\n", co->byted_code[i]);
         // }
+
         return GOT_CODE_SUCCESSFULLY;
     }
     fprintf(stderr, "IMPLIED: HLT HAS NOT BEEN FOUND\n");
     return READ_F_REACHED_END;
+}
+
+bool GotComOrOSym(char **buf_ptr) {
+    assert(buf_ptr);
+
+    if (**buf_ptr == ';') {
+        (*buf_ptr) += strlen(*buf_ptr) + 1;
+        return true;
+    }
+    if (**buf_ptr == '\0') {
+        (*buf_ptr)++;
+        return true;
+    }
+    return false;
 }
 
 bool CheckComHasArgs(int read_com) {
@@ -435,12 +462,7 @@ int SecondRun(code_t *co, size_t lines_amount) {
     char *buf_ptr = co->default_code;
     for (size_t line_ind = 0; line_ind < lines_amount; line_ind++) {
         SpacesSkip(&buf_ptr);
-        if (*buf_ptr == ';') {
-            buf_ptr += strlen(buf_ptr) + 1;
-            continue;
-        }
-        if (*buf_ptr == '\0') {
-            buf_ptr++;
+        if (GotComOrOSym(&buf_ptr)) {
             continue;
         }
         int lab = 0, lab_scan_info = ScanLabel(buf_ptr, &lab, line_ind);
@@ -603,8 +625,6 @@ bool CheckComLine(command_t com, char *buf_ptr, size_t line_ind, int *check_arg)
         return ChecKJmpCom(buf_ptr, line_ind, "JNE", check_arg);
     case IN_COM:
         buf_ptr += sizeof("IN") - 1;
-        // printf(buf_ptr);
-        // printf("|\n");
         if (LineIsEmptyComs(buf_ptr)) {
             return true;
         }
