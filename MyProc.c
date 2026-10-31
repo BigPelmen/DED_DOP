@@ -65,6 +65,8 @@ typedef struct {
     stack_t funcs_stck;
 } procsr_t;
 
+#define MIN_SYMBOLS_PER_LINE 3
+
 // SECTION - Functions prototypes
 
 int FillByCo(buffers_info_t *binf);
@@ -131,6 +133,9 @@ int main(int argc, char const *argv[]) {
     return 0;
 }
 
+// !SECTION
+// SECTION - Reader functions
+
 int FillByCo(buffers_info_t *binf) {
     assert(binf);
 
@@ -167,13 +172,10 @@ int FillByCo(buffers_info_t *binf) {
     return 0;
 }
 
-// !SECTION
-// SECTION - Reader functions
-
 bool FilesAreWrong(int *fd_read, size_t *f_read_size) {
     assert(fd_read);
     assert(f_read_size);
-    
+
     *fd_read = GetFDesc("ByteCode.txt", O_RDONLY, S_IRUSR);
     if (*fd_read < 0) {
         fprintf(stderr, "Byte code file descriptor is wrong\n");
@@ -238,7 +240,7 @@ int *GetCodeFromTxt(int fd_read, size_t f_read_size) {
 
     res_buf_ptr[transferred - 1] = '\0';
     size_t real_len = 0;
-    return ReadBytedBuf(res_buf_ptr, 500, &real_len);
+    return ReadBytedBuf(res_buf_ptr, transferred / MIN_SYMBOLS_PER_LINE, &real_len);
 }
 
 int *ReadBytedBuf(char *buf, size_t lines_amount, size_t *real_len) {
