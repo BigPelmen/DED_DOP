@@ -46,6 +46,15 @@ typedef enum {
     fprintf(stderr, "%s function FAILED while pushing\n", which_function)
 
 typedef struct {
+    FILE *file_log;
+    int fd_read, bin_fd;
+    size_t f_read_size, bin_f_size;
+    int *by_co;
+    int args_amount;
+    const char *where_read;
+} buffers_info_t;
+
+typedef struct {
     int *byte_code;
     int pc;
     int *rgstr;
@@ -58,7 +67,8 @@ typedef struct {
 
 // SECTION - Functions prototypes
 
-bool FilesAreWrong(FILE **f_log, int *fd_read, size_t *f_read_size);
+int FillByCo(buffers_info_t *binf);
+bool FilesAreWrong(int *fd_read, size_t *f_read_size);
 int *GetCodeFromTxt(int fd_read, size_t f_read_size);
 bool GetTxtFileWrong(int *fd_read, size_t *f_read_size, const char *name);
 bool GetBinFileWrong(int *fd_bin, size_t *bin_f_size, const char *name);
@@ -99,33 +109,53 @@ void IntStackPrint(FILE *f_log, const void *element);
 // SECTION - main
 
 int main(int argc, char const *argv[]) {
+    buffers_info_t f_buf_params = {.file_log = NULL, .fd_read = -1, .bin_fd = -1, 
+        .f_read_size = 0, .bin_f_size = 0, .by_co = NULL, .args_amount = argc, .where_read = NULL};
+    switch (argc) {
+    case 1:
+        f_buf_params.where_read = "ByteCode.txt";
+        break;
+    case 2:
+        f_buf_params.where_read = argv[1];
+        break;
+    }
+    if (FillByCo(&f_buf_params)) {
+        return 1;
+    }
+
     procsr_t proc = {};
-    FILE *file_log = NULL;
-    int fd_read = -1, bin_fd = -1;
-    size_t f_read_size = 0, bin_f_size = 0;
-    int *by_co = NULL;
-    if ((file_log = LogOpen("LogFile.txt", "w")) == NULL) {
+    ProcInit(&proc, f_buf_params.by_co ON_DBG(, __LINE__, f_buf_params.file_log));
+    RunCode(&proc);
+    ProcDestroy(&proc ON_DBG(, __FILE__, __LINE__));
+    close(f_buf_params.fd_read), fclose(f_buf_params.file_log), close(f_buf_params.bin_fd);
+    return 0;
+}
+
+int FillByCo(buffers_info_t *binf) {
+    assert(binf);
+
+    if ((binf->file_log = LogOpen("LogFile.txt", "w")) == NULL) {
         fprintf(stderr, "Log file is not correct\n");
         return 1;
     }
-    switch (argc) {
+    switch (binf->args_amount) {
     case 1:
-        if (FilesAreWrong(&file_log, &fd_read, &f_read_size)) {
+        if (FilesAreWrong(&binf->fd_read, &binf->f_read_size)) {
             return 1;
         }
         break;
     case 2:
-        bin_fd = strlen(argv[1]) - 1;
-        if (bin_fd > 4 && argv[1][bin_fd - 2] == 'b' && argv[1][bin_fd - 1] == 'i' && argv[1][bin_fd] == 'n') {
-            if (GetBinFileWrong(&bin_fd, &bin_f_size, argv[1]) || 
-                (by_co = (int *)calloc(bin_f_size, sizeof(uint8_t))) == NULL || 
-                read(bin_fd, by_co, bin_f_size) <= 0) {
+        binf->bin_fd = strlen(binf->where_read) - 1;
+        if (binf->bin_fd > 4 && IsBinFormat(binf->where_read)) {
+            if (GetBinFileWrong(&binf->bin_fd, &binf->bin_f_size, binf->where_read) || 
+                (binf->by_co = (int *)calloc(binf->bin_f_size, sizeof(uint8_t))) == NULL || 
+                read(binf->bin_fd, binf->by_co, binf->bin_f_size) <= 0) {
                 return 1;
             }
         }
         else {
-            if (GetTxtFileWrong(&fd_read, &f_read_size, argv[1]) || 
-                (by_co = GetCodeFromTxt(fd_read, f_read_size)) == NULL) {
+            if (GetTxtFileWrong(&binf->fd_read, &binf->f_read_size, binf->where_read) || 
+                (binf->by_co = GetCodeFromTxt(binf->fd_read,    binf->f_read_size)) == NULL) {
                 return 1;
             }
         }
@@ -134,29 +164,16 @@ int main(int argc, char const *argv[]) {
         fprintf(stderr, "BAD ARGUMENTS FOR THE PROGRAM HAVE BEEN GIVEN\n");
         return 1;
     };
-    
-    ProcInit(&proc, by_co ON_DBG(, __LINE__, file_log));
-    RunCode(&proc);
-    ProcDestroy(&proc ON_DBG(, __FILE__, __LINE__));
-    close(fd_read), fclose(file_log), close(bin_fd);
     return 0;
 }
 
 // !SECTION
 // SECTION - Reader functions
 
-bool FilesAreWrong(FILE **f_log, int *fd_read, size_t *f_read_size) {
-    assert(f_log);
+bool FilesAreWrong(int *fd_read, size_t *f_read_size) {
     assert(fd_read);
     assert(f_read_size);
-    // assert((fd_read == NULL) + (f_read_size == NULL) + (fd_bin == NULL) + (bin_f_size == NULL) < 3);
-
-    *f_log = LogOpen("LogFile.txt", "w");
-    if (*f_log == NULL) {
-        fprintf(stderr, "Log file is not correct\n");
-        return true;
-    }
-    // if (fd_read != NULL && bin_f_size != NULL) {
+    
     *fd_read = GetFDesc("ByteCode.txt", O_RDONLY, S_IRUSR);
     if (*fd_read < 0) {
         fprintf(stderr, "Byte code file descriptor is wrong\n");
@@ -167,10 +184,6 @@ bool FilesAreWrong(FILE **f_log, int *fd_read, size_t *f_read_size) {
         fprintf(stderr, "Did not manage to get byte code file size\n");
         return true;
     }
-    // }
-    // if (fd_bin != NULL && bin_f_size != NULL) {
-    //     return GetBinFileWrong(fd_bin, bin_f_size);
-    // }
     return false;
 }
 

@@ -81,8 +81,6 @@ const char DFLT_WR_BIN_F_NAME[] = "ByteCode.bin";
 
 // SECTION - Functions prototypes
 
-
-bool IsBinFormat(char const *f_name);
 int Fill_ACVP_structure(struct argcv_parse *acvp, char const *where_read, char const *where_write);
 int ArgC_V_Parse(struct argcv_parse *acvp);
 int GetFDesc(const char *f_name, int flags, mode_t f_mode);
@@ -154,16 +152,6 @@ int main(int argc, char const *argv[]) {
     // deleter/destructor;
 
     return RunAss(&my_code, &acvp);
-}
-
-bool IsBinFormat(char const *f_name) {
-    assert(f_name);
-    
-    size_t len = strlen(f_name) - 1;
-    if (f_name[len] == 'n' && f_name[len - 1] == 'i' && f_name[len - 2] == 'b' && f_name[len - 3] == '.') {
-        return true;
-    }
-    return false;
 }
 
 int Fill_ACVP_structure(struct argcv_parse *acvp, char const *where_read, char const *where_write) {

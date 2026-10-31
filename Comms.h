@@ -57,11 +57,22 @@ typedef enum {
 #undef GET_NAME
 #define GET_NAME(var) #var
 
+bool IsBinFormat(char const *f_name);
 int GetFDesc(const char *f_name, int flags, mode_t f_mode);
 size_t GetFileSize(int fd);
 int GetCodeOffset(int com);
 void SpacesSkip(char **buf);
 void GraphemeSkip(char **buf);
+
+bool IsBinFormat(char const *f_name) {
+    assert(f_name);
+    
+    size_t len = strlen(f_name) - 1;
+    if (f_name[len] == 'n' && f_name[len - 1] == 'i' && f_name[len - 2] == 'b' && f_name[len - 3] == '.') {
+        return true;
+    }
+    return false;
+}
 
 int GetFDesc(const char *f_name, int flags, mode_t f_mode) {
     assert(f_name);
