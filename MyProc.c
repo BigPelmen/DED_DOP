@@ -27,6 +27,7 @@ typedef enum {
     JMP_ERROR_GOT = 1 << 6,
     IN_ERROR_GOT = 1 << 7,
     CALL_ERROR_GOT = 1 << 8,
+    DRAW_ERROR_GOT = 1 << 9,
     OUT_ERROR_GOT = 1 << (sizeof(int) * 8 - 2),
     HLT_ERROR_GOT = 1 << (sizeof(int) * 8 - 1),
 } exit_code_t;
@@ -37,7 +38,8 @@ typedef enum {
 } got_operation_res_t;
 
 #define REGS_AMOUNT 8
-#define RAM_PRC_SIZE 100
+#define RAM_PRC_SIZE_X 80
+#define RAM_PRC_SIZE_Y 40
 #define RAM_COEF 2
 
 #define PRINT_PUSH_COM_FAIL(which_function) \
@@ -76,12 +78,15 @@ int JneCom(procsr_t *prc);
 int PushCom(procsr_t *prc);
 int PushrCom(procsr_t *prc);
 int PushmCom(procsr_t *prc);
+int PushrmCom(procsr_t *prc);
 int PoprCom(procsr_t *prc);
 int PopmCom(procsr_t *prc);
+int PoprmCom(procsr_t *prc);
 int Multiply(procsr_t *prc);
 int Divide(procsr_t *prc);
 int Add(procsr_t *prc);
 int Subtract(procsr_t *prc);
+int DrawCom(procsr_t *prc);
 int OutputRes(procsr_t *prc);
 int InputRes(procsr_t *prc);
 int CallCom(procsr_t *prc);
@@ -110,7 +115,7 @@ int main(int argc, char const *argv[]) {
         }
         break;
     case 2:
-        bin_fd = strlen(argv[1]) - 1;  
+        bin_fd = strlen(argv[1]) - 1;
         if (bin_fd > 4 && argv[1][bin_fd - 2] == 'b' && argv[1][bin_fd - 1] == 'i' && argv[1][bin_fd] == 'n') {
             if (GetBinFileWrong(&bin_fd, &bin_f_size, argv[1]) || 
                 (by_co = (int *)calloc(bin_f_size, sizeof(uint8_t))) == NULL || 
@@ -173,7 +178,7 @@ bool GetBinFileWrong(int *fd_bin, size_t *bin_f_size, const char *name) {
     assert(fd_bin);
     assert(bin_f_size);
 
-    *fd_bin = GetFDesc(name, O_RDONLY, S_IRUSR);
+    *fd_bin = GetFDesc(name, O_RDONLY | O_BINARY, S_IRUSR);
     if (*fd_bin < 0) {
         fprintf(stderr, "Byte code file descriptor is wrong for .bin file\n");
         return true;
@@ -299,7 +304,7 @@ void ProcInit(procsr_t *prc, int *b_code ON_DBG(, int ln, FILE *file_log)) {
     for (size_t i = 0; i < REGS_AMOUNT; i++) {
         rgstry[i] = (i + 1) * 100;
     }
-    int *ramy = (int *)calloc(RAM_PRC_SIZE, sizeof(int));
+    int *ramy = (int *)calloc(RAM_PRC_SIZE_X * RAM_PRC_SIZE_Y, sizeof(int));
     if (ramy == NULL) {
         prc->ram = NULL;
         prc->byte_code = NULL;
@@ -360,10 +365,14 @@ int RunOperation(procsr_t *prc) {
         return (PushrCom(prc)) ? NORMAL_PERFORM : PUSH_ERROR_GOT;
     case PUSHM_COM:
         return (PushmCom(prc)) ? NORMAL_PERFORM : PUSH_ERROR_GOT;
+    case PUSHRM_COM:
+        return (PushrmCom(prc)) ? NORMAL_PERFORM : POP_ERROR_GOT;
     case POPR_COM:
         return (PoprCom(prc)) ? NORMAL_PERFORM : POP_ERROR_GOT;
     case POPM_COM:
         return (PopmCom(prc)) ? NORMAL_PERFORM : POP_ERROR_GOT;
+    case POPRM_COM:
+        return (PoprmCom(prc)) ? NORMAL_PERFORM : POP_ERROR_GOT;
     case ADD_COM:
         return (Add(prc)) ? NORMAL_PERFORM : ADD_ERROR_GOT;
     case SUB_COM:
@@ -392,6 +401,8 @@ int RunOperation(procsr_t *prc) {
         return (CallCom(prc)) ? NORMAL_PERFORM : CALL_ERROR_GOT;
     case RET_COM:
         return (RetCom(prc)) ? NORMAL_PERFORM : CALL_ERROR_GOT;
+    case DRAW_COM:
+        return (DrawCom(prc)) ? NORMAL_PERFORM : DRAW_ERROR_GOT;
     case WRONG_COMMAND_COM:
         return HLT_ERROR_GOT;
     };
@@ -575,6 +586,21 @@ int PushmCom(procsr_t *prc) {
     return OPERATION_OK;
 }
 
+int PushrmCom(procsr_t *prc) {
+    assert(prc);
+
+    ON_PRC_IFS(
+        if (StackPush(&prc->proc_stck, prc->ram[prc->rgstr[prc->byte_code[prc->pc + 1]]]) != 
+            EGENERALLY_STACK_OK || prc->proc_stck.cur_err != EGENERALLY_STACK_OK) {
+            PRINT_PUSH_COM_FAIL(__func__);
+            prc->pc += ONE_ARG_OFFSET;
+            return OPERATION_FAIL;
+        }
+    )
+    prc->pc += ONE_ARG_OFFSET;
+    return OPERATION_OK;
+}
+
 int PoprCom(procsr_t *prc) {
     assert(prc);
 
@@ -590,6 +616,15 @@ int PopmCom(procsr_t *prc) {
     prc->pc += ONE_ARG_OFFSET;
     return OPERATION_OK;
 }
+
+int PoprmCom(procsr_t *prc) {
+    assert(prc);
+
+    prc->ram[prc->rgstr[prc->byte_code[prc->pc + 1]]] = StackPop(&prc->proc_stck);
+    prc->pc += ONE_ARG_OFFSET;
+    return OPERATION_OK;
+}
+
 
 // !SECTION
 // SECTION - Mathimatical functions
@@ -666,6 +701,25 @@ int Subtract(procsr_t *prc) {
 // !SECTION
 // SECTION - System functions
 
+int DrawCom(procsr_t *prc) {
+    assert(prc);
+
+    for (size_t y = 0; y < RAM_PRC_SIZE_Y; y++) {
+        fprintf(stdout, "|");
+        for (size_t x = 0; x < RAM_PRC_SIZE_X; x++) {
+            if (prc->ram[y * RAM_PRC_SIZE_X + x]) {
+                fprintf(stdout, "%c", prc->ram[y * RAM_PRC_SIZE_X + x]);
+            }
+            else {
+                fprintf(stdout, " ");
+            }
+        }
+        fprintf(stdout, "|\n");
+    }
+    prc->pc += NO_ARG_OFFSET;
+    return OPERATION_OK;
+}
+
 int OutputRes(procsr_t *prc) {
     assert(prc);
     
@@ -738,14 +792,14 @@ int SoftHalt(procsr_t *prc) {
     assert(prc);
     
     prc->is_active = false;
-    prc->pc += NO_ARG_OFFSET;
+    prc->pc += ZERO_OFFSET;
     if (prc->prc_err != NORMAL_PERFORM) {
         fprintf(stderr, "PROCESS MAY HAS GOT THE FATAL ERROR AND FINISHED UNNORMALLY\n");
         return OPERATION_FAIL;
     }
 
-    LogStackDump(prc->funcs_stck.file_log, &prc->funcs_stck, &IntStackPrint);
-    LogStackDump(prc->proc_stck.file_log, &prc->proc_stck, &IntStackPrint);
+    // LogStackDump(prc->funcs_stck.file_log, &prc->funcs_stck, &IntStackPrint);
+    // LogStackDump(prc->proc_stck.file_log, &prc->proc_stck, &IntStackPrint);
     return OPERATION_OK;
 }
 

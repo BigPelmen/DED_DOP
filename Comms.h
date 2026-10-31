@@ -22,8 +22,10 @@ typedef enum {
     PUSH_COM,
     PUSHR_COM,
     PUSHM_COM,
+    PUSHRM_COM,
     POPR_COM,
     POPM_COM,
+    POPRM_COM,
     ADD_COM,
     SUB_COM,
     MULT_COM,
@@ -35,20 +37,22 @@ typedef enum {
     JBE_COM,
     JE_COM,
     JNE_COM,
+    IN_COM,
     CALL_COM,
     RET_COM,
-    IN_COM,
+    DRAW_COM,
     WRONG_COMMAND_COM,
 } command_t;
 
 // #define HLT_COM_OFFSET 255
 #define ONE_ARG_OFFSET 2
 #define NO_ARG_OFFSET 1
+#define ZERO_OFFSET 0
 // #define JMP_OFFSET 0
 // #define CALL_OFFSET 0
 // #define RET_OFFSET 0
 #define CODE_LINE_MULTIPLIER 5
-#define REGS_DEPTH 4
+#define REGS_DEPTH 10
 
 #undef GET_NAME
 #define GET_NAME(var) #var
@@ -94,9 +98,13 @@ int GetCodeOffset(int com) {
         return ONE_ARG_OFFSET;
     case PUSHM_COM:
         return ONE_ARG_OFFSET;
+    case PUSHRM_COM:
+        return ONE_ARG_OFFSET;
     case POPR_COM:
         return ONE_ARG_OFFSET;
     case POPM_COM:
+        return ONE_ARG_OFFSET;
+    case POPRM_COM:
         return ONE_ARG_OFFSET;
     case ADD_COM:
         return NO_ARG_OFFSET;
@@ -125,6 +133,8 @@ int GetCodeOffset(int com) {
     case CALL_COM:
         return ONE_ARG_OFFSET;
     case RET_COM:
+        return NO_ARG_OFFSET;
+    case DRAW_COM:
         return NO_ARG_OFFSET;
     case WRONG_COMMAND_COM:
         return NO_ARG_OFFSET;

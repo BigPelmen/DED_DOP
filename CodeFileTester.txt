@@ -1,0 +1,25 @@
+PUSH 111
+POP AX
+PUSH 122
+POP BBX
+PUSH AX ; frg
+OUT
+PUSH BBX
+OUT
+
+    ; PUSH 100 ; rtgt fffdff
+PUSH 12345
+POP [15]
+PUSH [15] ;ebu  hhfhfh
+OUT
+
+PUSH 65
+POP AX
+PUSH AX
+POP [AX]
+PUSH [AX] ;   jjjjj j
+OUT
+
+DRAW
+
+HLT ; ijiudfh 
